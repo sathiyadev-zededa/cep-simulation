@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Edge CEP Dashboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: ui-sans-serif, system-ui; margin: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #aaa; background: #f7f7f7; cursor:pointer; }
+    button:hover { background:#eee; }
+    pre { background: #0b1020; color: #d6e0ff; padding: 10px; border-radius: 10px; overflow:auto; }
+    .kpi { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; }P1+r4632=1B5B32347E\P0+r2531\P0+r2638\P1+r6B62=7F\P0+r6B49\P1+r6B44=1B5B337E\P1+r6B68=1B4F48\P1+r4037=1B4F46\P1+r6B50=1B5B357E\P1+r6B4E=1B5B367E\
+    .kpi div { padding: 8px; border: 1px solid #eee; border-radius: 10px; }
+    .tag { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #ddd; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h2>Edge CEP Dashboard (No SCADA)</h2>
+  <div class="row">
+    <button onclick="sendCmd('normal 10')">Normal</button>
+    <button onclick="sendCmd('transient_fault 30')">Transient Fault</button>
+    <button onclick="sendCmd('permanent_fault 90')">Permanent Fault</button>
+    <button onclick="sendCmd('transformer_overload 120')">Transformer Overload</button>
+    <button onclick="sendCmd('weather_lightning 60')">Lightning</button>
+    <button onclick="sendCmd('comms_loss 30')">Comms Loss</button>
+  </div>
+
+  <p class="tag">MQTT Topics: edge/events, edge/incidents, edge/commands</p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Latest Telemetry</h3>
+      <div class="kpi" id="telemetryKpi"></div>
+      <h4>Raw</h4>
+      <pre id="telemetryRaw">waiting…</pre>
+    </div>
+
+    <div class="card">
+      <h3>Incidents (latest)</h3>
+      <div id="incList"></div>
+      <h4>Last Incident Raw</h4>
+      <pre id="incidentRaw">waiting…</pre>
+    </div>
+  </div>
+
+  <script>
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    let latestTelemetry = null;
+    let lastIncident = null;
+    const incArr = [];
+
+    function sendCmd(cmd) {
+      ws.send(JSON.stringify({cmd}));
+    }
+
+    function renderTelemetry(t) {
+      const p = (t?.payload || {});
+      const kpis = [
+        ["Mode", p.mode],
+        ["Voltage (kV)", p.v_kv],
+        ["Current (A)", p.i_a],
+        ["Breaker Closed", p.breaker_closed],
+        ["Reclose Attempts", p.reclose_attempts],
+        ["TX Load (%)", p.tx_load_pct],
+        ["TX Temp (°C)", p.tx_temp_c],
+      ];
+      document.getElementById("telemetryKpi").innerHTML =
+        kpis.map(([k,v]) => `<div><b>${k}</b><br/>${v ?? "-"}</div>`).join("");
+      document.getElementById("telemetryRaw").textContent = JSON.stringify(t, null, 2);
+    }
+
+    function renderIncidents() {
+      const list = incArr.slice(-8).reverse().map(i => {
+        const p = i.payload || {};
+        return `<div style="border:1px solid #eee;border-radius:10px;padding:8px;margin:8px 0">
+          <b>${p.incident_type || "INCIDENT"}</b> — confidence <b>${p.confidence}</b><br/>
+          ${p.summary || ""}</div>`;
+      }).join("");
+      document.getElementById("incList").innerHTML = list || "waiting…";
+      if (lastIncident) {
+        document.getElementById("incidentRaw").textContent = JSON.stringify(lastIncident, null, 2);
+      }
+    }
+
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      const topic = msg.topic;
+      const data = msg.data;
+
+      if (topic === "edge/events" && data.event_type === "telemetry") {
+        latestTelemetry = data;
+        renderTelemetry(latestTelemetry);
+      }
+
+      if (topic === "edge/incidents" && data.event_type === "incident") {
+        lastIncident = data;
+        incArr.push(data);
+        renderIncidents();
+      }
+    };
+  </script>
+</body>
+</html>
