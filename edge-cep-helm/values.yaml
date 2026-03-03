@@ -29,7 +29,7 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-imagePullSecrets:
+imagePullSecret:
   name: regcred
   dockerconfigjson: "eyJhdXRocyI6eyJjb21tb25wb2MuYXp1cmVjci5pbyI6eyJ1c2VybmFtZSI6ImNvbW1vbnBvYyIsInBhc3N3b3JkIjoiSkk4MDgzKz1Ob2VybGZlL0N1dThieW8yT3RCTHdSNXoiLCJhdXRoIjoiWTI5dGJXOXVjRzlqT2twSk9EQTRNeXM5VG05bGNteG1aUzlEZFhVNFlubHZNazkwUWt4M1VqVjYifX19"
 
