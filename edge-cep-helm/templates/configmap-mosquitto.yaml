@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mqtt-config
-  namespace: {{ .values.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "edgecep.labels" . | nindent 4 }}
 data:

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cep-engine
-  namespace: {{ .values.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "edgecep.labels" . | nindent 4 }}
 spec:
@@ -16,6 +16,8 @@ spec:
         app: cep-engine
         {{- include "edgecep.labels" . | nindent 8 }}
     spec:
+      imagePullSecrets:
+      - name: {{ .Values.imagePullSecret.name }}
       containers:
         - name: cep-engine
           image: {{ .Values.cep.image }}

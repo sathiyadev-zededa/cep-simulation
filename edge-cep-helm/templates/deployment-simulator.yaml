@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: simulator
-  namespace: {{ .values.namespace }}
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "edgecep.labels" . | nindent 4 }}
 spec:
@@ -16,6 +16,8 @@ spec:
         app: simulator
         {{- include "edgecep.labels" . | nindent 8 }}
     spec:
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret.name }}
       containers:
         - name: simulator
           image: {{ .Values.simulator.image }}
