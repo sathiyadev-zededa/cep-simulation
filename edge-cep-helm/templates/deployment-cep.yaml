@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cep-engine
+  namespace: {{ .values.namespace }}
+  labels:
+    {{- include "edgecep.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.cep.replicaCount }}
+  selector:
+    matchLabels:
+      app: cep-engine
+  template:
+    metadata:
+      labels:
+        app: cep-engine
+        {{- include "edgecep.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: cep-engine
+          image: {{ .Values.cep.image }}
+          env:
+            - name: MQTT_HOST
+              value: {{ .Values.mqttHost | quote }}
+            - name: MQTT_PORT
+              value: {{ .Values.mqttPort | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
