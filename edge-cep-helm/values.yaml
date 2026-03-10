@@ -11,7 +11,7 @@ dashboard:
     nodePort: 30080
 
 simulator:
-  image: commonpoc.azurecr.io/simulator
+  image: commonpoc.azurecr.io/simulator:1.0
   replicaCount: 1
 
 cep:
