@@ -9,4 +9,4 @@ COPY simulator.py .
 ENV MQTT_HOST=mqtt-broker
 ENV MQTT_PORT=1883
 
-CMD ["python", "simulator.py"]
+CMD ["python", "simulator_v2.py"]
