@@ -5,102 +5,521 @@
   <title>Edge CEP Dashboard</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: ui-sans-serif, system-ui; margin: 16px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; }
-    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #aaa; background: #f7f7f7; cursor:pointer; }
-    button:hover { background:#eee; }
-    pre { background: #0b1020; color: #d6e0ff; padding: 10px; border-radius: 10px; overflow:auto; }
-    .kpi { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; }P1+r4632=1B5B32347E\P0+r2531\P0+r2638\P1+r6B62=7F\P0+r6B49\P1+r6B44=1B5B337E\P1+r6B68=1B4F48\P1+r4037=1B4F46\P1+r6B50=1B5B357E\P1+r6B4E=1B5B367E\
-    .kpi div { padding: 8px; border: 1px solid #eee; border-radius: 10px; }
-    .tag { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #ddd; font-size:12px; }
+    /* ── Reset & base ───────────────────────────────────────────── */
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui; margin: 0; background: #f0f2f5; color: #1a1a2e; }
+
+    /* ── Top bar ────────────────────────────────────────────────── */
+    .topbar {
+      background: #1b4f8a;
+      color: #fff;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+    .topbar .topics { font-size: 11px; opacity: 0.7; }
+
+    /* ── Scenario buttons ───────────────────────────────────────── */
+    .scenarios {
+      background: #fff;
+      padding: 12px 20px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #dde3ec;
+      align-items: center;
+    }
+    .scenarios span { font-size: 12px; color: #666; margin-right: 4px; font-weight: 600; }
+    button {
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid #c5cfe0;
+      background: #f4f7fb;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: #1b4f8a;
+      transition: background 0.15s;
+    }
+    button:hover { background: #dde8f5; border-color: #1b4f8a; }
+    button.active { background: #1b4f8a; color: #fff; border-color: #1b4f8a; }
+
+    /* ── Main layout ────────────────────────────────────────────── */
+    .main { padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Tab navigation ─────────────────────────────────────────── */
+    .tabs { display: flex; gap: 4px; border-bottom: 2px solid #dde3ec; }
+    .tab {
+      padding: 8px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #666;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.15s;
+    }
+    .tab:hover { color: #1b4f8a; }
+    .tab.active { color: #1b4f8a; border-bottom-color: #1b4f8a; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Cards & grid ───────────────────────────────────────────── */
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .card {
+      background: #fff;
+      border: 1px solid #dde3ec;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card h3 { margin: 0 0 12px; font-size: 14px; color: #1b4f8a; font-weight: 700; }
+    .card h4 { margin: 12px 0 6px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* ── KPI tiles ──────────────────────────────────────────────── */
+    .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .kpi-tile {
+      padding: 10px;
+      background: #f4f7fb;
+      border-radius: 8px;
+      border: 1px solid #e4eaf3;
+    }
+    .kpi-tile .label { font-size: 11px; color: #888; margin-bottom: 2px; }
+    .kpi-tile .value { font-size: 16px; font-weight: 700; color: #1b4f8a; }
+    .kpi-tile .value.ok   { color: #16a34a; }
+    .kpi-tile .value.warn { color: #d97706; }
+    .kpi-tile .value.crit { color: #dc2626; }
+
+    /* ── Raw JSON viewer ────────────────────────────────────────── */
+    pre {
+      background: #0b1020;
+      color: #a8c4f0;
+      padding: 12px;
+      border-radius: 10px;
+      overflow: auto;
+      font-size: 11px;
+      max-height: 200px;
+      margin: 0;
+    }
+
+    /* ── Incident cards ─────────────────────────────────────────── */
+    .inc-card {
+      border: 1px solid #e4eaf3;
+      border-left: 4px solid #1b4f8a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: #f9fbff;
+    }
+    .inc-card .inc-type { font-weight: 700; font-size: 13px; color: #1b4f8a; }
+    .inc-card .inc-conf { font-size: 12px; color: #666; margin-left: 8px; }
+    .inc-card .inc-summary { font-size: 12px; color: #444; margin-top: 4px; }
+    .inc-card.high  { border-left-color: #dc2626; }
+    .inc-card.med   { border-left-color: #d97706; }
+    .inc-card.low   { border-left-color: #16a34a; }
+
+    /* ── LLM summary banner ─────────────────────────────────────── */
+    .summary-banner {
+      background: linear-gradient(135deg, #e8f4f8, #f0f7ff);
+      border: 1px solid #b8d8f0;
+      border-left: 4px solid #00838f;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+    .summary-banner .label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #00838f;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+    .summary-banner .text { font-size: 13px; color: #2c3e50; line-height: 1.6; }
+    .summary-banner .meta { font-size: 10px; color: #888; margin-top: 6px; }
+
+    /* ── LLM report card ────────────────────────────────────────── */
+    .report-card {
+      background: #fff;
+      border: 1px solid #dde3ec;
+      border-top: 4px solid #1b4f8a;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .report-card .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .report-card .report-type {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1b4f8a;
+    }
+    .report-card .report-meta {
+      font-size: 11px;
+      color: #888;
+      text-align: right;
+    }
+    .report-card .report-summary {
+      font-size: 12px;
+      color: #555;
+      background: #f4f7fb;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 12px;
+    }
+    .report-card .report-body {
+      font-size: 13px;
+      color: #2c3e50;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      background: #fafbfd;
+      border: 1px solid #edf0f5;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 380px;
+      overflow-y: auto;
+    }
+    .report-card .rag-badges {
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .badge.blue  { background: #dbeafe; color: #1d4ed8; }
+    .badge.teal  { background: #ccfbf1; color: #0f766e; }
+    .badge.amber { background: #fef3c7; color: #b45309; }
+
+    /* ── Status dot ─────────────────────────────────────────────── */
+    .status-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .status-dot.green { background: #22c55e; animation: pulse 2s infinite; }
+    .status-dot.red   { background: #ef4444; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+    }
+
+    /* ── Scrollable list ────────────────────────────────────────── */
+    .scroll-list { max-height: 320px; overflow-y: auto; }
+
+    /* ── Empty state ────────────────────────────────────────────── */
+    .empty { color: #aaa; font-size: 13px; padding: 20px 0; text-align: center; }
   </style>
 </head>
 <body>
-  <h2>Edge CEP Dashboard (No SCADA)</h2>
-  <div class="row">
-    <button onclick="sendCmd('normal 10')">Normal</button>
-    <button onclick="sendCmd('transient_fault 30')">Transient Fault</button>
-    <button onclick="sendCmd('permanent_fault 90')">Permanent Fault</button>
-    <button onclick="sendCmd('transformer_overload 120')">Transformer Overload</button>
-    <button onclick="sendCmd('weather_lightning 60')">Lightning</button>
-    <button onclick="sendCmd('comms_loss 30')">Comms Loss</button>
+
+<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+<div class="topbar">
+  <h1>⚡ Edge CEP Dashboard</h1>
+  <div class="topics">
+    <span class="status-dot" id="connDot"></span>
+    edge/events &nbsp;·&nbsp; edge/incidents &nbsp;·&nbsp; edge/reports &nbsp;·&nbsp; edge/summaries
+  </div>
+</div>
+
+<!-- ── Scenario buttons ─────────────────────────────────────────────────── -->
+<div class="scenarios">
+  <span>SCENARIO:</span>
+  <button onclick="sendCmd('normal 10',this)">Normal</button>
+  <button onclick="sendCmd('transient_fault 30',this)">Transient Fault</button>
+  <button onclick="sendCmd('permanent_fault 90',this)">Permanent Fault</button>
+  <button onclick="sendCmd('transformer_overload 120',this)">Transformer Overload</button>
+  <button onclick="sendCmd('weather_lightning 60',this)">Lightning</button>
+  <button onclick="sendCmd('comms_loss 30',this)">Comms Loss</button>
+</div>
+
+<!-- ── Main ─────────────────────────────────────────────────────────────── -->
+<div class="main">
+
+  <!-- Tab nav -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('telemetry',this)">Telemetry</div>
+    <div class="tab" onclick="switchTab('incidents',this)">Incidents</div>
+    <div class="tab" onclick="switchTab('llm',this)">LLM Intelligence <span id="reportBadge"></span></div>
   </div>
 
-  <p class="tag">MQTT Topics: edge/events, edge/incidents, edge/commands</p>
-
-  <div class="grid">
-    <div class="card">
-      <h3>Latest Telemetry</h3>
-      <div class="kpi" id="telemetryKpi"></div>
-      <h4>Raw</h4>
-      <pre id="telemetryRaw">waiting…</pre>
-    </div>
-
-    <div class="card">
-      <h3>Incidents (latest)</h3>
-      <div id="incList"></div>
-      <h4>Last Incident Raw</h4>
-      <pre id="incidentRaw">waiting…</pre>
+  <!-- ── Tab 1: Telemetry ──────────────────────────────────────────────── -->
+  <div class="tab-panel active" id="tab-telemetry">
+    <div class="grid2">
+      <div class="card">
+        <h3>Live Telemetry — FEEDER-12</h3>
+        <div class="kpi" id="telemetryKpi">
+          <div class="empty">Waiting for data…</div>
+        </div>
+        <h4>Raw Event</h4>
+        <pre id="telemetryRaw">waiting…</pre>
+      </div>
+      <div class="card">
+        <h3>Extended Metrics</h3>
+        <div class="kpi" id="extKpi">
+          <div class="empty">Waiting for data…</div>
+        </div>
+        <h4>Mode Timeline</h4>
+        <div id="modeLog" style="max-height:160px;overflow-y:auto;font-size:12px;color:#555;"></div>
+      </div>
     </div>
   </div>
 
-  <script>
-    const ws = new WebSocket(`ws://${location.host}/ws`);
-    let latestTelemetry = null;
-    let lastIncident = null;
-    const incArr = [];
+  <!-- ── Tab 2: Incidents ──────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-incidents">
+    <div class="grid2">
+      <div class="card">
+        <h3>Detected Incidents</h3>
+        <div class="scroll-list" id="incList">
+          <div class="empty">No incidents detected yet</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Last Incident — Raw JSON</h3>
+        <pre id="incidentRaw">waiting…</pre>
+      </div>
+    </div>
+  </div>
 
-    function sendCmd(cmd) {
-      ws.send(JSON.stringify({cmd}));
+  <!-- ── Tab 3: LLM Intelligence ──────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-llm">
+
+    <!-- Running narrative -->
+    <div class="summary-banner" id="summaryBanner">
+      <div class="label">🤖 Live Narrative — updated every 10 seconds</div>
+      <div class="text" id="summaryText">Waiting for first LLM summary…</div>
+      <div class="meta" id="summaryMeta"></div>
+    </div>
+
+    <!-- Reports -->
+    <div class="card">
+      <h3>Incident Reports</h3>
+      <div class="scroll-list" id="reportList">
+        <div class="empty">No reports generated yet — trigger a fault scenario to generate one</div>
+      </div>
+    </div>
+
+  </div>
+
+</div><!-- /main -->
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────────
+  const ws       = new WebSocket(`ws://${location.host}/ws`);
+  const incArr   = [];
+  const reportArr = [];
+  let lastMode   = "";
+  let reportCount = 0;
+
+  // ── WebSocket connection status ──────────────────────────────────────────
+  ws.onopen  = () => document.getElementById("connDot").className = "status-dot green";
+  ws.onclose = () => document.getElementById("connDot").className = "status-dot red";
+
+  // ── Scenario button ──────────────────────────────────────────────────────
+  function sendCmd(cmd, btn) {
+    ws.send(JSON.stringify({cmd}));
+    document.querySelectorAll(".scenarios button").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+  }
+
+  // ── Tab switching ────────────────────────────────────────────────────────
+  function switchTab(name, el) {
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.getElementById("tab-" + name).classList.add("active");
+    el.classList.add("active");
+    // Clear report badge when user opens LLM tab
+    if (name === "llm") {
+      reportCount = 0;
+      document.getElementById("reportBadge").textContent = "";
+    }
+  }
+
+  // ── Telemetry rendering ──────────────────────────────────────────────────
+  function colourClass(key, val) {
+    if (key === "TX Load (%)")  return val > 120 ? "crit" : val > 90 ? "warn" : "ok";
+    if (key === "TX Temp (°C)") return val > 100 ? "crit" : val > 85 ? "warn" : "ok";
+    if (key === "Voltage (kV)") return val < 9   ? "crit" : val < 10.5 ? "warn" : "ok";
+    if (key === "Breaker Closed") return val === false ? "crit" : "ok";
+    return "";
+  }
+
+  function renderTelemetry(t) {
+    const p = t?.payload || {};
+    const mode = p.mode || "normal";
+
+    // Track mode changes
+    if (mode !== lastMode) {
+      lastMode = mode;
+      const log = document.getElementById("modeLog");
+      const ts  = new Date().toLocaleTimeString();
+      log.innerHTML = `<div style="padding:3px 0;border-bottom:1px solid #eee">
+        <b>${ts}</b> → <span style="color:#1b4f8a">${mode}</span></div>` + log.innerHTML;
     }
 
-    function renderTelemetry(t) {
-      const p = (t?.payload || {});
-      const kpis = [
-        ["Mode", p.mode],
-        ["Voltage (kV)", p.v_kv],
-        ["Current (A)", p.i_a],
-        ["Breaker Closed", p.breaker_closed],
-        ["Reclose Attempts", p.reclose_attempts],
-        ["TX Load (%)", p.tx_load_pct],
-        ["TX Temp (°C)", p.tx_temp_c],
-      ];
-      document.getElementById("telemetryKpi").innerHTML =
-        kpis.map(([k,v]) => `<div><b>${k}</b><br/>${v ?? "-"}</div>`).join("");
-      document.getElementById("telemetryRaw").textContent = JSON.stringify(t, null, 2);
+    const kpis = [
+      ["Mode",            p.mode],
+      ["Voltage (kV)",    p.v_kv],
+      ["Current (A)",     p.i_a],
+      ["Breaker Closed",  p.breaker_closed],
+      ["Reclose Attempts",p.reclose_attempts],
+      ["TX Load (%)",     p.tx_load_pct],
+      ["TX Temp (°C)",    p.tx_temp_c],
+    ];
+    document.getElementById("telemetryKpi").innerHTML = kpis.map(([k,v]) =>
+      `<div class="kpi-tile">
+        <div class="label">${k}</div>
+        <div class="value ${colourClass(k, v)}">${v ?? "—"}</div>
+      </div>`
+    ).join("");
+
+    // Extended fields (new in v2)
+    const ext = [
+      ["Frequency (Hz)",   p.frequency_hz],
+      ["Power Factor",     p.power_factor],
+      ["Harmonics THD %",  p.harmonics_thd_pct],
+      ["Health Score",     p.health_score],
+      ["Fault Phase",      p.fault_phase],
+      ["Load Factor",      p.load_factor],
+    ];
+    const extHtml = ext.filter(([,v]) => v !== undefined).map(([k,v]) =>
+      `<div class="kpi-tile">
+        <div class="label">${k}</div>
+        <div class="value">${v ?? "—"}</div>
+      </div>`
+    ).join("");
+    document.getElementById("extKpi").innerHTML = extHtml || "<div class='empty'>No extended fields</div>";
+
+    document.getElementById("telemetryRaw").textContent = JSON.stringify(t, null, 2);
+  }
+
+  // ── Incident rendering ───────────────────────────────────────────────────
+  function severityClass(conf) {
+    if (conf >= 0.85) return "high";
+    if (conf >= 0.70) return "med";
+    return "low";
+  }
+
+  function renderIncidents() {
+    const list = incArr.slice(-10).reverse().map(i => {
+      const p    = i.payload || {};
+      const conf = p.confidence || 0;
+      const cls  = severityClass(conf);
+      const ts   = new Date(i.ts_ms).toLocaleTimeString();
+      return `<div class="inc-card ${cls}">
+        <span class="inc-type">${p.incident_type || "INCIDENT"}</span>
+        <span class="inc-conf">confidence ${(conf*100).toFixed(0)}%</span>
+        <span style="float:right;font-size:11px;color:#aaa">${ts}</span>
+        <div class="inc-summary">${p.summary || ""}</div>
+      </div>`;
+    }).join("") || "<div class='empty'>No incidents yet</div>";
+
+    document.getElementById("incList").innerHTML = list;
+    const last = incArr[incArr.length - 1];
+    if (last) document.getElementById("incidentRaw").textContent = JSON.stringify(last, null, 2);
+  }
+
+  // ── LLM summary rendering ────────────────────────────────────────────────
+  function renderSummary(payload) {
+    document.getElementById("summaryText").textContent = payload.narrative || "—";
+    document.getElementById("summaryMeta").textContent =
+      `${payload.event_count} events in last ${payload.window_s}s · model: ${payload.model} · ${payload.generated_at}`;
+  }
+
+  // ── LLM report rendering ─────────────────────────────────────────────────
+  function renderReports() {
+    if (reportArr.length === 0) {
+      document.getElementById("reportList").innerHTML =
+        "<div class='empty'>No reports yet — trigger a fault scenario</div>";
+      return;
     }
 
-    function renderIncidents() {
-      const list = incArr.slice(-8).reverse().map(i => {
-        const p = i.payload || {};
-        return `<div style="border:1px solid #eee;border-radius:10px;padding:8px;margin:8px 0">
-          <b>${p.incident_type || "INCIDENT"}</b> — confidence <b>${p.confidence}</b><br/>
-          ${p.summary || ""}</div>`;
-      }).join("");
-      document.getElementById("incList").innerHTML = list || "waiting…";
-      if (lastIncident) {
-        document.getElementById("incidentRaw").textContent = JSON.stringify(lastIncident, null, 2);
-      }
+    const html = reportArr.slice().reverse().map(p => {
+      const conf    = p.confidence || 0;
+      const ts      = p.generated_at || "";
+      const ragUsed = p.rag_context_used || 0;
+
+      const similarBadges = (p.similar_incidents || []).map(s =>
+        `<span class="badge amber" title="Recorded: ${s.recorded}">
+          Similar: ${s.type} (${s.similarity})
+        </span>`
+      ).join("");
+
+      return `<div class="report-card">
+        <div class="report-header">
+          <div>
+            <div class="report-type">${p.incident_type || "INCIDENT REPORT"}</div>
+            <div style="font-size:12px;color:#666;margin-top:2px">${p.feeder_id || ""} · ${p.transformer_id || ""}</div>
+          </div>
+          <div class="report-meta">
+            Confidence: <b>${(conf*100).toFixed(0)}%</b><br/>
+            ${ts}<br/>
+            <span style="color:#00838f">RAG: ${ragUsed} past incidents used</span>
+          </div>
+        </div>
+        <div class="report-summary">${p.incident_summary || ""}</div>
+        <div class="report-body">${p.report || "No report text"}</div>
+        <div class="rag-badges">
+          <span class="badge blue">model: ${p.model || "—"}</span>
+          <span class="badge teal">stored: ${p.stored_as || "—"}</span>
+          ${similarBadges}
+        </div>
+      </div>`;
+    }).join("");
+
+    document.getElementById("reportList").innerHTML = html;
+  }
+
+  // ── WebSocket message handler ─────────────────────────────────────────────
+  ws.onmessage = (ev) => {
+    const msg   = JSON.parse(ev.data);
+    const topic = msg.topic;
+    const data  = msg.data;
+
+    // ── Telemetry ──────────────────────────────────────────────────────────
+    if (topic === "edge/events" && data.event_type === "telemetry") {
+      renderTelemetry(data);
     }
 
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
-      const topic = msg.topic;
-      const data = msg.data;
+    // ── CEP Incidents ──────────────────────────────────────────────────────
+    if (topic === "edge/incidents" && data.event_type === "incident") {
+      incArr.push(data);
+      renderIncidents();
+    }
 
-      if (topic === "edge/events" && data.event_type === "telemetry") {
-        latestTelemetry = data;
-        renderTelemetry(latestTelemetry);
-      }
+    // ── LLM Summary (10-second narrative) ─────────────────────────────────
+    if (topic === "edge/summaries" && data.event_type === "llm_summary") {
+      renderSummary(data.payload);
+    }
 
-      if (topic === "edge/incidents" && data.event_type === "incident") {
-        lastIncident = data;
-        incArr.push(data);
-        renderIncidents();
+    // ── LLM Incident Report ────────────────────────────────────────────────
+    if (topic === "edge/reports" && data.event_type === "llm_report") {
+      reportArr.push(data.payload);
+      renderReports();
+
+      // Badge on tab if user is not on LLM tab
+      const llmTab = document.querySelector(".tab:nth-child(3)");
+      if (!llmTab.classList.contains("active")) {
+        reportCount++;
+        document.getElementById("reportBadge").textContent =
+          ` (${reportCount} new)`;
+        document.getElementById("reportBadge").style.color = "#dc2626";
       }
-    };
-  </script>
+    }
+  };
+</script>
 </body>
 </html>

@@ -11,16 +11,16 @@ import paho.mqtt.client as mqtt
 MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
-TOPIC_EVENTS = "edge/events"
+TOPIC_EVENTS    = "edge/events"
 TOPIC_INCIDENTS = "edge/incidents"
-TOPIC_COMMANDS = "edge/commands"
+TOPIC_COMMANDS  = "edge/commands"
+TOPIC_REPORTS   = "edge/reports"     # ← LLM full incident reports
+TOPIC_SUMMARIES = "edge/summaries"   # ← LLM 10-second narratives
 
 app = FastAPI(title="Edge CEP Dashboard UI")
 
-# Serve files under /static
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Serve the main page explicitly
 @app.get("/")
 def index():
     return FileResponse("static/index.html")
@@ -47,6 +47,8 @@ async def broadcast(msg: Dict[str, Any]) -> None:
 def on_connect(client, userdata, flags, rc):
     client.subscribe(TOPIC_EVENTS)
     client.subscribe(TOPIC_INCIDENTS)
+    client.subscribe(TOPIC_REPORTS)    # ← new
+    client.subscribe(TOPIC_SUMMARIES)  # ← new
 
 def on_message(client, userdata, msg):
     data = safe_json_loads(msg.payload)
