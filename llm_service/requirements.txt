@@ -1,0 +1,5 @@
+paho-mqtt==2.1.0
+chromadb==0.5.23
+sentence-transformers==3.4.1
+ollama==0.4.7
+torch==2.6.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
