@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-broker
+  namespace: {{ .Values.namespace}}
+  labels:
+    {{- include "edgecep.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: mqtt-broker
+  ports:
+    - name: mqtt
+      port: {{ .Values.mqtt.servicePort }}
+      targetPort: {{ .Values.mqtt.servicePort }}

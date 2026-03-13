@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simulator
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "edgecep.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.simulator.replicaCount }}
+  selector:
+    matchLabels:
+      app: simulator
+  template:
+    metadata:
+      labels:
+        app: simulator
+        {{- include "edgecep.labels" . | nindent 8 }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret.name }}
+      containers:
+        - name: simulator
+          image: {{ .Values.simulator.image }}
+          env:
+            - name: MQTT_HOST
+              value: {{ .Values.mqttHost | quote }}
+            - name: MQTT_PORT
+              value: {{ .Values.mqttPort | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -407,6 +407,11 @@
   }
 
   // ── Incident rendering ───────────────────────────────────────────────────
+  // Map severity string → 0-1 confidence (for old flat format that has no confidence field)
+  function severityToConf(severity) {
+    return {CRITICAL: 0.95, HIGH: 0.85, MEDIUM: 0.70, LOW: 0.55}[severity] || 0.60;
+  }
+
   function severityClass(conf) {
     if (conf >= 0.85) return "high";
     if (conf >= 0.70) return "med";
@@ -415,15 +420,20 @@
 
   function renderIncidents() {
     const list = incArr.slice(-10).reverse().map(i => {
-      const p    = i.payload || {};
-      const conf = p.confidence || 0;
+      // Handle both formats:
+      //   new format: { event_type:"incident", ts_ms, payload:{ incident_type, severity, ... } }
+      //   old/flat format: { incident_type, severity, description, ts_ms, ... }
+      const p    = i.payload || i;
+      const conf = p.confidence || severityToConf(p.severity);
       const cls  = severityClass(conf);
       const ts   = new Date(i.ts_ms).toLocaleTimeString();
+      const loc  = [p.feeder_id, p.transformer_id].filter(x => x && x !== "—").join(" · ");
       return `<div class="inc-card ${cls}">
         <span class="inc-type">${p.incident_type || "INCIDENT"}</span>
-        <span class="inc-conf">confidence ${(conf*100).toFixed(0)}%</span>
+        <span class="inc-conf">${p.severity || ""} · confidence ${(conf*100).toFixed(0)}%</span>
         <span style="float:right;font-size:11px;color:#aaa">${ts}</span>
-        <div class="inc-summary">${p.summary || ""}</div>
+        ${loc ? `<div style="font-size:11px;color:#888;margin-top:2px">${loc}</div>` : ""}
+        <div class="inc-summary">${p.summary || p.description || ""}</div>
       </div>`;
     }).join("") || "<div class='empty'>No incidents yet</div>";
 
@@ -495,7 +505,9 @@
     }
 
     // ── CEP Incidents ──────────────────────────────────────────────────────
-    if (topic === "edge/incidents" && data.event_type === "incident") {
+    // Accept any message on edge/incidents regardless of event_type field
+    // (handles both old flat format and new wrapped format)
+    if (topic === "edge/incidents") {
       incArr.push(data);
       renderIncidents();
     }

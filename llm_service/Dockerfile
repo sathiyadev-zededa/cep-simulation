@@ -42,6 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --no-cache-dir --prefix=/install \
+    torch \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+
 # Copy and install Python deps into a prefix directory
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
@@ -62,7 +66,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY llm_service.py .
+COPY llm_service_v2.py .
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 

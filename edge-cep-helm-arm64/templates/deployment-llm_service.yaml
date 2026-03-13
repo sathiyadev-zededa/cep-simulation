@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "edgecep.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.llmService.replicaCount }}
+  selector:
+    matchLabels:
+      app: llm-service
+  template:
+    metadata:
+      labels:
+        app: llm-service
+        {{- include "edgecep.labels" . | nindent 8 }}
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecret.name }}
+
+      # initContainer waits for Ollama API to be ready before llm-service starts.
+      # This replicates the wait loop in entrypoint.sh for Kubernetes.
+      initContainers:
+        # wait-for-ollama: uses curl HTTP check — Ollama has a real HTTP API
+        - name: wait-for-ollama
+          image: curlimages/curl:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Ollama at {{ .Values.llmService.ollamaHost }}..."
+              until curl -sf --max-time 5 {{ .Values.llmService.ollamaHost }}/api/tags > /dev/null; do
+                echo "Ollama not ready — retrying in 5s..."
+                sleep 5
+              done
+              echo "Ollama is ready."
+        # wait-for-mqtt: uses nc (netcat) TCP check — more reliable than curl telnet://
+        # busybox includes nc which does a clean TCP connect-only check
+        - name: wait-for-mqtt
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MQTT broker at {{ .Values.mqttHost }}:{{ .Values.mqttPort }}..."
+              until nc -z {{ .Values.mqttHost }} {{ .Values.mqttPort }}; do
+                echo "MQTT not ready — retrying in 5s..."
+                sleep 5
+              done
+              echo "MQTT is ready."
+
+      containers:
+        - name: llm-service
+          image: {{ .Values.llmService.image }}
+          env:
+            - name: MQTT_HOST
+              value: {{ .Values.mqttHost | quote }}
+            - name: MQTT_PORT
+              value: {{ .Values.mqttPort | quote }}
+            - name: OLLAMA_HOST
+              value: {{ .Values.llmService.ollamaHost | quote }}
+            - name: OLLAMA_MODEL
+              value: {{ .Values.llmService.ollamaModel | quote }}
+            - name: CHROMA_PATH
+              value: {{ .Values.llmService.chromaPath | quote }}
+            - name: SITE_ID
+              value: {{ .Values.llmService.siteId | quote }}
+          volumeMounts:
+            - name: chromadb-data
+              mountPath: {{ .Values.llmService.chromaPath }}
+          readinessProbe:
+            exec:
+              # Service is ready when it has connected to MQTT
+              command:
+                - python
+                - -c
+                - "import socket; socket.setdefaulttimeout(3); socket.socket().connect(('{{ .Values.mqttHost }}', {{ .Values.mqttPort }}))"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3 
+      volumes:
+        - name: chromadb-data
+          persistentVolumeClaim:
+            claimName: chromadb-data

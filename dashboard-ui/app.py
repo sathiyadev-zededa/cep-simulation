@@ -44,11 +44,31 @@ async def broadcast(msg: Dict[str, Any]) -> None:
     for ws in dead:
         clients.discard(ws)
 
-def on_connect(client, userdata, flags, rc):
-    client.subscribe(TOPIC_EVENTS)
-    client.subscribe(TOPIC_INCIDENTS)
-    client.subscribe(TOPIC_REPORTS)    # ← new
-    client.subscribe(TOPIC_SUMMARIES)  # ← new
+_PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
+
+def _subscribe_all(client):
+    for topic in [TOPIC_EVENTS, TOPIC_INCIDENTS, TOPIC_REPORTS, TOPIC_SUMMARIES]:
+        client.subscribe(topic)
+    paho_ver = "v2" if _PAHO_V2 else "v1"
+    print(f"[DASH] MQTT connected (paho {paho_ver}) — subscribed to: "
+          f"{TOPIC_EVENTS}, {TOPIC_INCIDENTS}, {TOPIC_REPORTS}, {TOPIC_SUMMARIES}")
+
+if _PAHO_V2:
+    def on_connect(client, userdata, flags, reason_code, properties=None):
+        success = not reason_code.is_failure if hasattr(reason_code, "is_failure") else (reason_code == 0)
+        if success:
+            _subscribe_all(client)
+        else:
+            print(f"[DASH] MQTT connection failed: reason_code={reason_code}")
+else:
+    def on_connect(client, userdata, flags, rc):
+        if rc == 0:
+            _subscribe_all(client)
+        else:
+            print(f"[DASH] MQTT connection failed: rc={rc}")
+
+def on_disconnect(client, userdata, *args):
+    print(f"[DASH] MQTT disconnected — will reconnect")
 
 def on_message(client, userdata, msg):
     data = safe_json_loads(msg.payload)
@@ -56,9 +76,14 @@ def on_message(client, userdata, msg):
     if loop:
         asyncio.run_coroutine_threadsafe(broadcast(payload), loop)
 
-mqtt_client = mqtt.Client(client_id="dashboard_ui")
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
+if _PAHO_V2:
+    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="dashboard_ui")
+else:
+    mqtt_client = mqtt.Client(client_id="dashboard_ui")
+mqtt_client.on_connect    = on_connect
+mqtt_client.on_disconnect = on_disconnect
+mqtt_client.on_message    = on_message
+print(f"[DASH] paho-mqtt {'v2' if _PAHO_V2 else 'v1'} — connecting to {MQTT_HOST}:{MQTT_PORT}")
 
 @app.on_event("startup")
 async def startup():

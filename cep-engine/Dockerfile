@@ -7,10 +7,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app
-COPY cep_engine.py .
+COPY cep_engine_v2.py .
 
 # Default MQTT settings (override at runtime)
 ENV MQTT_HOST=mqtt-broker
 ENV MQTT_PORT=1883
 
-CMD ["python", "cep_engine.py"]
+CMD ["python", "cep_engine_v2.py"]

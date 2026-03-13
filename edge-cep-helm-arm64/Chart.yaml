@@ -2,5 +2,5 @@ apiVersion: v2
 name: edge-cep-demo
 description: Edge CEP Demo - mqtt broker, simulator, cep engine, dashboard UI
 type: application
-version: 0.1.0
-appVersion: "1.0"
+version: 0.3.0
+appVersion: "3.0"

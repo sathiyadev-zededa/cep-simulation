@@ -37,26 +37,14 @@ namespace: cep-edge
 
 ollama:
   image: ollama/ollama:latest
-  storage: 10Gi
-
-gpu:
-  enabled: true
-  count: "1"
-
-resources:
-  requests:
-    cpu: "500m"
-    memory: "2Gi"
-  limits:
-    cpu: "2000m"
-    memory: "6Gi"
+  storage: 3Gi
 
 llmService:
-  image: commonpoc.azurecr.io/llm_service:2.0.2
+  image: commonpoc.azurecr.io/llm_service:1.0
   replicaCount: 1
   ollamaHost: "http://ollama:11434"
-  ollamaModel: "phi3"
+  ollamaModel: "llama3.2:1b"
   chromaPath: "/app/incident_store"
-  chromaStorage: 3Gi
+  chromaStorage: 2Gi
   siteId: "SUBSTATION-ABU-01"
 

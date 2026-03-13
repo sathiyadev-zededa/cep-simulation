@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "edgecep.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+        {{- include "edgecep.labels" . | nindent 8 }}
+    spec:
+      {{- if .Values.ollama.gpu.enabled }}
+      runtimeClassName: nvidia
+      {{- end }}
+      # No imagePullSecret needed — ollama/ollama is a public image
+      containers:
+        - name: ollama
+          image: {{ .Values.ollama.image }}
+          ports:
+            - containerPort: 11434
+          env:
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_MAX_LOADED_MODELS
+              value: "1"
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama 
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.ollama.resources.requests.cpu | quote }}
+              memory: {{ .Values.ollama.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.ollama.resources.limits.cpu | quote }}
+              memory: {{ .Values.ollama.resources.limits.memory | quote }}
+              {{- if .Values.ollama.gpu.enabled }}
+              nvidia.com/gpu: {{ .Values.ollama.gpu.count | quote }}
+              {{- end }}
+
+      volumes:
+        - name: ollama-data
+          persistentVolumeClaim:
+            claimName: ollama-data

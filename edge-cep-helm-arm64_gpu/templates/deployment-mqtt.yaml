@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-broker
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "edgecep.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mqtt-broker
+  template:
+    metadata:
+      labels:
+        app: mqtt-broker
+        {{- include "edgecep.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: mqtt-broker
+          image: {{ .Values.mqtt.image }}
+          ports:
+            - containerPort: {{ .Values.mqtt.servicePort }}
+          volumeMounts:
+            - name: mqtt-config
+              mountPath: /mosquitto/config/mosquitto.conf
+              subPath: mosquitto.conf
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: mqtt-config
+          configMap:
+            name: mqtt-config

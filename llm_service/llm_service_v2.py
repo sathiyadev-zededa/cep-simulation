@@ -51,6 +51,9 @@ import ollama
 import paho.mqtt.client as mqtt
 from chromadb.utils import embedding_functions
 
+# ─── PAHO v1 / v2 COMPAT ─────────────────────────────────────────────────────
+_PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
+
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
@@ -260,11 +263,12 @@ class IncidentMemory:
 
 class OllamaClient:
     def __init__(self, host: str = OLLAMA_HOST, model: str = OLLAMA_MODEL):
-        self.model = model
-        self.host  = host
-        # Tell the ollama library where the server is
-        os.environ["OLLAMA_HOST"] = host
-        print(f"[OLLAMA] Host: {host}  Model: {model}")
+        self.model  = model
+        self.host   = host
+        # Always use an explicit Client instance so the host is honoured
+        # regardless of the ollama library version (env var is unreliable in v0.2+)
+        self._client = ollama.Client(host=host)
+        print(f"[OLLAMA] Client created → host={host}  model={model}")
         # Auto-pull the model if it is not already downloaded
         self._ensure_model()
 
@@ -278,43 +282,54 @@ class OllamaClient:
         """
         if not self.is_available():
             print("[OLLAMA] Server not reachable — skipping model check.")
-            print(f"[OLLAMA] Make sure Ollama is installed and running at {self.host}")
+            print(f"[OLLAMA] Make sure Ollama is running at {self.host}")
             return
 
         if self._model_exists():
             print(f"[OLLAMA] Model '{self.model}' already downloaded — ready.")
             return
 
-        print(f"[OLLAMA] Model '{self.model}' not found locally — downloading now...")
+        print(f"[OLLAMA] Model '{self.model}' not found — downloading now...")
         print("[OLLAMA] This may take a few minutes depending on your connection.")
         self._pull_model()
 
     def _model_exists(self) -> bool:
-        """Return True if the model is already present in Ollama's local store."""
+        """Return True if the model is present in Ollama's local store.
+        Uses self._client so the correct remote host is always contacted."""
         try:
-            local_models = ollama.list()
-            names = [m["name"] for m in local_models.get("models", [])]
-            # Match on base name — "llama3.2" matches "llama3.2:latest" etc.
+            local_models = self._client.list()
+            # ollama >= 0.2 returns a Pydantic ListResponse; older returns a dict
+            if isinstance(local_models, dict):
+                models_list = local_models.get("models", [])
+                names = [m.get("name", "") for m in models_list]
+            else:
+                models_list = getattr(local_models, "models", [])
+                names = [
+                    getattr(m, "model", getattr(m, "name", ""))
+                    for m in models_list
+                ]
+            print(f"[OLLAMA] Models on server: {names}")
             return any(self.model in name for name in names)
         except Exception as e:
             print(f"[OLLAMA] Could not list models: {e}")
             return False
 
     def _pull_model(self) -> None:
-        """
-        Pull (download) the model from Ollama's registry.
-        Streams progress so the operator can see download status.
-        """
+        """Pull (download) the model via self._client so the correct host is used."""
         try:
-            print(f"[OLLAMA] Pulling {self.model} ...")
+            print(f"[OLLAMA] Pulling '{self.model}' from {self.host} ...")
             last_status = ""
-            # ollama.pull() returns a generator of progress dicts
-            for progress in ollama.pull(self.model, stream=True):
-                status  = progress.get("status", "")
-                total   = progress.get("total", 0)
-                completed = progress.get("completed", 0)
+            for progress in self._client.pull(self.model, stream=True):
+                # Handle both dict and Pydantic progress objects
+                if isinstance(progress, dict):
+                    status    = progress.get("status", "")
+                    total     = progress.get("total", 0)
+                    completed = progress.get("completed", 0)
+                else:
+                    status    = getattr(progress, "status", "")
+                    total     = getattr(progress, "total", 0) or 0
+                    completed = getattr(progress, "completed", 0) or 0
 
-                # Only print when status changes to avoid flooding the console
                 if status != last_status:
                     if total and completed:
                         pct = (completed / total) * 100
@@ -327,18 +342,16 @@ class OllamaClient:
 
         except Exception as e:
             print(f"[OLLAMA] Pull failed: {e}")
-            print(f"[OLLAMA] Run manually: ollama pull {self.model}")
+            print(f"[OLLAMA] Pull manually: kubectl exec <ollama-pod> -- ollama pull {self.model}")
 
     # ── Inference ─────────────────────────────────────────────────────────────
 
     def chat(self, system_prompt: str, user_prompt: str,
              max_tokens: int = 600) -> Optional[str]:
-        """
-        Send a prompt to Ollama and return the response text.
-        Returns None if Ollama is unavailable.
-        """
+        """Send a prompt to Ollama and return the response text.
+        Uses self._client so the correct remote host is always contacted."""
         try:
-            response = ollama.chat(
+            response = self._client.chat(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -346,15 +359,19 @@ class OllamaClient:
                 ],
                 options={"num_predict": max_tokens, "temperature": 0.3},
             )
-            return response["message"]["content"].strip()
+            # Handle both dict (old) and Pydantic (new) response formats
+            if isinstance(response, dict):
+                return response["message"]["content"].strip()
+            else:
+                return response.message.content.strip()
         except Exception as e:
             print(f"[OLLAMA] Chat error: {e}")
             return None
 
     def is_available(self) -> bool:
-        """Return True if the Ollama server is reachable."""
+        """Return True if the Ollama server at self.host is reachable."""
         try:
-            ollama.list()
+            self._client.list()
             return True
         except Exception:
             return False
@@ -611,13 +628,15 @@ class LLMService:
 service = LLMService()
 
 
-def on_connect(client, userdata, flags, rc, properties=None):
-    if rc == 0:
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    # paho-mqtt v2 passes reason_code (ReasonCode object) instead of rc (int)
+    # reason_code == 0 means success in both v1 and v2
+    if reason_code == 0:
         client.subscribe(TOPIC_EVENTS)
         client.subscribe(TOPIC_INCIDENTS)
         print(f"[MQTT] Connected — subscribed to {TOPIC_EVENTS}, {TOPIC_INCIDENTS}")
     else:
-        print(f"[MQTT] Connection failed with rc={rc}")
+        print(f"[MQTT] Connection failed with reason_code={reason_code}")
 
 
 def on_message(client, userdata, msg):
@@ -661,7 +680,7 @@ def main() -> None:
         print(f"[WARNING] Install Ollama from https://ollama.com then restart this service.")
         print(f"[WARNING] The model '{OLLAMA_MODEL}' will be pulled automatically on next start.")
 
-    # Set up MQTT client
+    # Set up MQTT client — use VERSION2 callback API (paho-mqtt >= 2.0)
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="llm_service")
     client.on_connect = on_connect
     client.on_message = on_message

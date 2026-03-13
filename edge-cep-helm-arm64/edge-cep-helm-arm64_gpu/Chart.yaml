@@ -1,0 +1,6 @@
+apiVersion: v2
+name: edge-cep-demo
+description: Edge CEP Demo - mqtt broker, simulator, cep engine, dashboard UI, Ollama/phi3, llm_services
+type: application
+version: 0.4.0
+appVersion: "4.0"
