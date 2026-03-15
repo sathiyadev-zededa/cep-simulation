@@ -86,7 +86,7 @@ The platform simulates a power distribution substation (`SUBSTATION-ABU-01`) wit
 |-------|-----------|------------|---------|
 | `edge/events` | simulator | cep-engine, llm-service | Raw telemetry and fault events |
 | `edge/incidents` | cep-engine | llm-service, dashboard-ui | Detected incidents with severity + confidence |
-| `edge/commands` | cep-engine | simulator | Auto-reclose and isolation commands |
+| `edge/commands` | dashboard-ui | simulator | Auto-reclose and isolation commands |
 | `edge/summaries` | llm-service | dashboard-ui | 10-second rolling plain-English narrative |
 | `edge/reports` | llm-service | dashboard-ui | Full structured incident reports |
 
