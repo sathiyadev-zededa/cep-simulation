@@ -15,7 +15,7 @@ simulator:
   replicaCount: 1
 
 cep:
-  image: commonpoc.azurecr.io/cep-engine-arm64:1.0.3
+  image: commonpoc.azurecr.io/cep_engine_rust_arm64:1.0.0
   replicaCount: 1
 
 mqttHost: mqtt-broker

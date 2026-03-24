@@ -1,0 +1,24 @@
+[package]
+name    = "cep-engine"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "cep-engine"
+path = "src/main.rs"
+
+[dependencies]
+tokio        = { version = "1",    features = ["full"] }
+rumqttc      = "0.24"       #MQTT client
+serde        = { version = "1",    features = ["derive"] }
+serde_json   = "1"
+chrono       = { version = "0.4",  features = ["serde"] }
+uuid         = { version = "1",    features = ["v4"] }
+dashmap      = "6"
+tracing              = "0.1"
+tracing-subscriber   = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto       = true
+strip     = true     # strip debug symbols → smaller binary
