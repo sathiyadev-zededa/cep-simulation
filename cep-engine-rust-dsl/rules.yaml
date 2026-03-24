@@ -1,0 +1,233 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  CEP Engine — Rule DSL
+#
+#  Each rule has:
+#    id          : unique identifier (used in logs)
+#    priority    : evaluation order — 1 = highest; rules sorted ascending
+#    description : human-readable summary
+#    on          : event_type to match (required)
+#    where       : field conditions (optional)
+#                    field: {in: [...]}        value in list
+#                    field: {gt/gte/lt/lte: N} numeric comparison
+#                    field: true/false          boolean match
+#                    any: [{...}, {...}]        OR — at least one sub-map matches
+#    window      : sliding-window count check (optional)
+#                    bucket    : bucket name (scoped per feeder)
+#                    seconds   : look-back period
+#                    count_gte : minimum event count to fire
+#    fire        : incident to emit
+#                    type            : incident_type string
+#                    severity        : CRITICAL / HIGH / MEDIUM / LOW
+#                    confidence      : 0.0 – 1.0
+#                    message         : template — use {field_name} placeholders
+#                                      {feeder_id}, {site_id}, {window_count}
+#                                      + any payload field e.g. {relay_code}
+#                    fault_scenario  : optional fault scenario tag
+#                    relay_codes_from: payload field whose value becomes relay_codes
+#                    escalate        : list of severity overrides
+#                      when   : field conditions (same syntax as where)
+#                      severity / confidence : override values when matched
+#    early_return      : true → stop evaluating lower-priority rules (default: false)
+#    clear_window_on_fire : true → reset bucket after firing (default: false)
+#
+#  To add a new rule:  add an entry below and restart the engine — no recompile.
+#  To change a threshold: edit the value and restart.
+# ─────────────────────────────────────────────────────────────────────────────
+
+rules:
+
+  # ── Priority 1: Busbar fault ─────────────────────────────────────────────
+  - id: busbar_fault
+    priority: 1
+    description: "Busbar differential (87B) or breaker failure (50BF) relay operated"
+    on: relay_trip
+    where:
+      relay_code:
+        in: ["87B", "50BF"]
+    fire:
+      type: BUSBAR_FAULT
+      severity: CRITICAL
+      confidence: 0.95
+      message: "Busbar protection relay {relay_code} operated on {feeder_id} — possible busbar fault"
+      relay_codes_from: relay_code
+    early_return: true
+
+  # ── Priority 2: Transformer fault ────────────────────────────────────────
+  - id: transformer_fault
+    priority: 2
+    description: "Transformer differential (87T) or gas relay (63) operated"
+    on: relay_trip
+    where:
+      relay_code:
+        in: ["87T", "63"]
+    fire:
+      type: TRANSFORMER_FAULT
+      severity: CRITICAL
+      confidence: 0.92
+      message: "Transformer protection relay {relay_code} operated on {feeder_id} — differential or gas relay"
+      relay_codes_from: relay_code
+    early_return: true
+
+  # ── Priority 3: Distance / cable fault ───────────────────────────────────
+  - id: distance_fault
+    priority: 3
+    description: "Distance (21) or directional overcurrent (67) relay — cable insulation fault"
+    on: relay_trip
+    where:
+      relay_code:
+        in: ["21", "67"]
+    fire:
+      type: CABLE_FAULT
+      severity: HIGH
+      confidence: 0.88
+      message: "Distance relay {relay_code} operated on {feeder_id} — possible cable insulation fault"
+      relay_codes_from: relay_code
+      fault_scenario: CABLE_INSULATION_FAILURE
+
+  # ── Priority 4: Overcurrent ───────────────────────────────────────────────
+  - id: overcurrent
+    priority: 4
+    description: "Overcurrent relay (50/51) operated"
+    on: relay_trip
+    where:
+      relay_code:
+        in: ["50", "51", "50/51"]
+    fire:
+      type: RELAY_TRIP
+      severity: HIGH
+      confidence: 0.85
+      message: "Overcurrent relay {relay_code} operated on {feeder_id}"
+      relay_codes_from: relay_code
+
+  # ── Priority 5: Breaker lockout ───────────────────────────────────────────
+  - id: breaker_lockout
+    priority: 5
+    description: "Permanent fault — breaker locked out after multiple failed reclosures"
+    on: breaker_reclose
+    where:
+      success: false
+    window:
+      bucket: reclose_fail
+      seconds: 30
+      count_gte: 3
+    fire:
+      type: PERMANENT_FAULT
+      severity: CRITICAL
+      confidence: 0.95
+      message: "Breaker lockout on {feeder_id} after {window_count} failed reclose attempts"
+      fault_scenario: BREAKER_LOCKOUT
+    clear_window_on_fire: true
+
+  # ── Priority 6: Reclose success ───────────────────────────────────────────
+  - id: reclose_success
+    priority: 6
+    description: "Auto-reclose successful — transient fault cleared"
+    on: breaker_reclose
+    where:
+      success: true
+    fire:
+      type: RECLOSE_SUCCESS
+      severity: LOW
+      confidence: 0.90
+      message: "Auto-reclose successful on {feeder_id} — transient fault cleared"
+    clear_window_on_fire: true
+
+  # ── Priority 7: Equipment offline ────────────────────────────────────────
+  - id: equipment_offline
+    priority: 7
+    description: "Equipment taken out of service"
+    on: equipment_offline
+    fire:
+      type: EQUIPMENT_OFFLINE
+      severity: HIGH
+      confidence: 0.88
+      message: "Equipment offline: {asset} removed from service on {feeder_id}"
+
+  # ── Priority 8: Zone isolation ────────────────────────────────────────────
+  - id: zone_isolation
+    priority: 8
+    description: "Distribution zone isolated — section removed from service"
+    on: zone_isolation
+    fire:
+      type: ZONE_ISOLATION
+      severity: HIGH
+      confidence: 0.90
+      message: "Zone {zone} isolated on {feeder_id} — section removed from service"
+
+  # ── Priority 9: Transformer overload ─────────────────────────────────────
+  - id: transformer_overload
+    priority: 9
+    description: "Transformer operating above rated load (>105% = HIGH, >120% = CRITICAL)"
+    on: telemetry
+    where:
+      load_pct:
+        gt: 105.0
+    fire:
+      type: TRANSFORMER_OVERLOAD
+      severity: HIGH
+      confidence: 0.85
+      message: "Transformer {transformer_id} load warning: {load_pct}% of rated capacity on {feeder_id}"
+      escalate:
+        - when:
+            load_pct:
+              gt: 120.0
+          severity: CRITICAL
+          confidence: 0.92
+
+  # ── Priority 10: Pre-fault warning ───────────────────────────────────────
+  - id: pre_fault_warning
+    priority: 10
+    description: "Pre-fault condition — voltage sag >10% or current spike >20%"
+    on: telemetry
+    where:
+      any:
+        - v_sag_pct:
+            gt: 10.0
+        - i_spike_pct:
+            gt: 20.0
+    fire:
+      type: PRE_FAULT_WARNING
+      severity: MEDIUM
+      confidence: 0.70
+      message: "Pre-fault condition on {feeder_id}: voltage sag {v_sag_pct}% / current spike {i_spike_pct}%"
+
+  # ── Priority 11: Voltage quality ──────────────────────────────────────────
+  - id: voltage_quality
+    priority: 11
+    description: "Repeated harmonic distortion events (3+ in 60s)"
+    on: voltage_harmonics
+    window:
+      bucket: harmonics
+      seconds: 60
+      count_gte: 3
+    fire:
+      type: VOLTAGE_QUALITY_ISSUE
+      severity: MEDIUM
+      confidence: 0.75
+      message: "Repeated voltage harmonic events on {feeder_id}: {window_count} occurrences in 60s"
+
+  # ── Priority 12: Lightning impact ─────────────────────────────────────────
+  - id: lightning_impact
+    priority: 12
+    description: "Lightning strike detected — possible surge damage"
+    on: lightning_strike
+    fire:
+      type: LIGHTNING_IMPACT
+      severity: HIGH
+      confidence: 0.80
+      message: "Lightning strike detected on {feeder_id}: {strike_kA} kA — possible surge damage"
+
+  # ── Priority 13: Frequency deviation ─────────────────────────────────────
+  - id: frequency_deviation
+    priority: 13
+    description: "Repeated frequency deviation events (2+ in 60s)"
+    on: frequency_deviation
+    window:
+      bucket: freq_dev
+      seconds: 60
+      count_gte: 2
+    fire:
+      type: FREQUENCY_DEVIATION
+      severity: MEDIUM
+      confidence: 0.72
+      message: "Repeated frequency deviation on {feeder_id}: {freq_hz} Hz ({window_count} events in 60s)"
