@@ -328,60 +328,7 @@ The dashboard has a feeder selector (FEEDER-12 / FEEDER-13 / FEEDER-14) and thre
 
 ---
 
-## Quick Start
-
-### Prerequisites
-
-- Docker (with ARM64 build support)
-- `kubectl` and `helm`
-- Azure CLI (`az`) — for ACR push
-- Minikube or a Kubernetes cluster
-
-### 1 — Build and push images
-
-```bash
-eval $(minikube docker-env)   # if using Minikube
-
-az acr login --name commonpoc
-
-docker build --no-cache --platform linux/arm64 \
-  -t commonpoc.azurecr.io/cep-engine-arm64:3.1 ./cep-engine-rust-dsl
-docker build --no-cache --platform linux/arm64 \
-  -t commonpoc.azurecr.io/simulator-arm64:3.1 ./simulator
-docker build --no-cache --platform linux/arm64 \
-  -t commonpoc.azurecr.io/dashboard-ui-arm64:3.0 ./dashboard-ui
-docker build --no-cache --platform linux/arm64 \
-  -t commonpoc.azurecr.io/llm_service:2.1 ./llm_service
-
-docker push commonpoc.azurecr.io/cep-engine-arm64:3.1
-docker push commonpoc.azurecr.io/simulator-arm64:3.1
-docker push commonpoc.azurecr.io/dashboard-ui-arm64:3.0
-docker push commonpoc.azurecr.io/llm_service:2.1
-```
-
-### 2 — Deploy with Helm
-
-```bash
-helm upgrade --install cep-edge ./edge-cep-demo -n cep-edge --create-namespace
-```
-
-### 3 — Wait for pods
-
-```bash
-kubectl get pods -n cep-edge -w
-```
-
-All 6 pods should reach `Running`. The `llm-service` pod waits for both MQTT and Ollama via init containers before starting.
-
-### 4 — Open the dashboard
-
-```bash
-minikube service dashboard-ui -n cep-edge
-# or
-kubectl port-forward svc/dashboard-ui -n cep-edge 8080:8000
-```
-
-### 5 — Trigger a scenario
+###  — Trigger a scenario
 
 Select a feeder, click a scenario button. Within seconds you will see:
 
@@ -390,30 +337,6 @@ Select a feeder, click a scenario button. Within seconds you will see:
 - **LLM Intelligence tab** — full temporal report (CRITICAL/HIGH only, ~30–120s depending on model)
 
 ---
-
-## Helm Configuration
-
-Key `values.yaml` fields:
-
-```yaml
-simulator:
-  image: commonpoc.azurecr.io/simulator-arm64:3.1
-
-cep:
-  image: commonpoc.azurecr.io/cep-engine-arm64:3.1
-
-dashboard:
-  image: commonpoc.azurecr.io/dashboard-ui-arm64:3.0
-
-ollama:
-  image: ollama/ollama:latest
-  storage: 3Gi
-
-llmService:
-  image: commonpoc.azurecr.io/llm_service:2.1
-  ollamaModel: "llama3.2:1b"   # change to gemma2:2b or phi3 as needed
-  chromaStorage: 2Gi
-```
 
 ### Memory sizing by model
 
@@ -426,94 +349,7 @@ llmService:
 
 ---
 
-## Image Tags
 
-| Image | Tag | Changes |
-|-------|-----|---------|
-| `cep-engine-arm64` | `:3.1` | SustainedTracker, FaultEventAggregator, dual-channel publish, 17 rules |
-| `simulator-arm64` | `:3.1` | simulator_v4.py — 9 scenarios, sustained alarm thread, severe grid disturbance |
-| `dashboard-ui-arm64` | `:3.0` | Fault Events primary tab, feeder selector, scenario rows |
-| `llm_service` | `:2.1` | Fault-event-only reports, incident timeline buffer, temporal prompt, torch pinned |
-
----
-
-## Troubleshooting
-
-### Fault Events tab is empty
-
-```bash
-# Confirm fault events are being published
-kubectl exec -n cep-edge deploy/mqtt-broker -- \
-  mosquitto_sub -t edge/fault_events -W 15 -v
-
-# Check CEP engine aggregator logs
-kubectl logs -n cep-edge deploy/cep-engine --tail=50 | grep -E "FaultEvent|AGG|fault"
-```
-
-### LLM reports not appearing
-
-```bash
-# Confirm llm-service is receiving fault events (not just incidents)
-kubectl logs -n cep-edge deploy/llm-service --tail=50 | grep -E "FaultEvent|REPORT|fault"
-
-# Confirm Ollama has a model loaded
-kubectl exec -n cep-edge \
-  $(kubectl get pod -n cep-edge -l app=ollama -o jsonpath='{.items[0].metadata.name}') \
-  -- ollama list
-```
-
-### Pattern A (sustained) rule not firing
-
-Pattern A requires the condition to be **continuously observed** for `for_secs` seconds. The `SustainedTracker` resets if no observation arrives within 2 seconds. Ensure the simulator is sending repeated events at ≤ 2-second intervals for the full duration.
-
-```bash
-# Watch temperature_warning events arrive
-kubectl exec -n cep-edge deploy/mqtt-broker -- \
-  mosquitto_sub -t edge/events -W 80 -v | grep temperature_warning
-```
-
-### Browser showing old dashboard UI
-
-Hard refresh to bypass browser cache:
-```
-Mac:     Cmd + Shift + R
-Windows: Ctrl + Shift + R
-```
-Or open an incognito/private window.
-
-### llm-service crash loop (ConnectionRefusedError)
-
-The entrypoint retries MQTT and Ollama connections with a 120-second timeout. If pods are in `CrashLoopBackOff`:
-
-```bash
-kubectl logs -n cep-edge deploy/llm-service --tail=30
-# Look for [WAIT] or [WARN] lines to see which dependency is missing
-kubectl get pods -n cep-edge   # confirm mqtt-broker and ollama are Running
-```
-
-### Image pull errors (ACR)
-
-```bash
-kubectl describe pod -n cep-edge <pod-name> | grep -A5 "Failed"
-# If ImagePullBackOff — confirm the regcred secret exists
-kubectl get secret regcred -n cep-edge
-# Recreate if missing:
-kubectl create secret docker-registry regcred \
-  --docker-server=commonpoc.azurecr.io \
-  --docker-username=<username> \
-  --docker-password=<password> \
-  -n cep-edge
-```
-
-### CEP engine pod not starting
-
-```bash
-kubectl describe pod -n cep-edge -l app=cep-engine
-# Common cause: wrong image tag in values.yaml
-# Check: kubectl logs -n cep-edge deploy/cep-engine
-```
-
----
 
 ## Environment Variables
 
