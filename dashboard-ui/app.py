@@ -11,11 +11,12 @@ import paho.mqtt.client as mqtt
 MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
-TOPIC_EVENTS    = "edge/events"
-TOPIC_INCIDENTS = "edge/incidents"
-TOPIC_COMMANDS  = "edge/commands"
-TOPIC_REPORTS   = "edge/reports"     # ← LLM full incident reports
-TOPIC_SUMMARIES = "edge/summaries"   # ← LLM 10-second narratives
+TOPIC_EVENTS       = "edge/events"
+TOPIC_INCIDENTS    = "edge/incidents"
+TOPIC_COMMANDS     = "edge/commands"
+TOPIC_FAULT_EVENTS = "edge/fault_events"  # aggregated fault events (CEP → LLM + dashboard)
+TOPIC_REPORTS      = "edge/reports"       # LLM full incident reports
+TOPIC_SUMMARIES    = "edge/summaries"     # LLM 10-second narratives
 
 app = FastAPI(title="Edge CEP Dashboard UI")
 
@@ -47,7 +48,7 @@ async def broadcast(msg: Dict[str, Any]) -> None:
 _PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
 
 def _subscribe_all(client):
-    for topic in [TOPIC_EVENTS, TOPIC_INCIDENTS, TOPIC_REPORTS, TOPIC_SUMMARIES]:
+    for topic in [TOPIC_EVENTS, TOPIC_INCIDENTS, TOPIC_FAULT_EVENTS, TOPIC_REPORTS, TOPIC_SUMMARIES]:
         client.subscribe(topic)
     paho_ver = "v2" if _PAHO_V2 else "v1"
     print(f"[DASH] MQTT connected (paho {paho_ver}) — subscribed to: "

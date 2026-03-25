@@ -4,8 +4,9 @@
 //   MQTT subscription → edge/events
 //   DSL rule loader   → rules::load_rules()  (reads rules.yaml)
 //   Rules evaluation  → rules::evaluate()
-//   MQTT publish      → edge/incidents
-//   Background task   → CommsLossTracker
+//   MQTT publish      → edge/incidents        (all incidents, dashboard)
+//   MQTT publish      → edge/fault_events     (aggregated, LLM service)
+//   Background tasks  → CommsLossTracker, FaultEventAggregator flusher
 //
 // Environment variables:
 //   MQTT_HOST    default: mqtt-broker
@@ -14,16 +15,22 @@
 //   RULES_FILE   default: rules.yaml          ← path to the DSL config
 //   RUST_LOG     default: info  (set to debug for rule traces)
 
+mod aggregator;
 mod comms_loss;
 mod config;
 mod dedup;
 mod rules;
+mod suppression;
+mod sustained;
 mod types;
 mod window;
 
+use aggregator::FaultEventAggregator;
 use dedup::IncidentDedup;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use std::sync::Arc;
+use suppression::FaultSuppression;
+use sustained::SustainedTracker;
 use tokio::time::Duration;
 use tracing::{error, info, warn};
 use types::EdgeEvent;
@@ -57,15 +64,23 @@ async fn main() {
     info!("Rules file: {}", rules_file);
 
     // ── Load DSL rules ────────────────────────────────────────────────────────
-    // Panics with a clear error if rules.yaml is missing or malformed.
-    // After startup, rules are immutable — hot-reload is not supported yet.
     let rules = Arc::new(rules::load_rules(&rules_file));
 
     // ── Shared state ──────────────────────────────────────────────────────────
-    // Single window large enough for the widest rule (60s freq/harmonics).
-    // Rules call count_within(secs) so each uses its own look-back period.
     let window: Arc<WindowBuffer> = Arc::new(WindowBuffer::new(120));
     let dedup:  Arc<IncidentDedup> = Arc::new(IncidentDedup::new(20));
+
+    // FaultSuppression: when a CRITICAL incident fires for a feeder,
+    // suppress secondary incidents (voltage, temp, comms) for 60 s.
+    let suppression: Arc<FaultSuppression> = Arc::new(FaultSuppression::new(60));
+
+    // SustainedTracker: tracks how long a condition has been continuously true
+    // per feeder — used by Pattern A (sustained condition) rules.
+    let sustained: Arc<SustainedTracker> = Arc::new(SustainedTracker::new());
+
+    // FaultEventAggregator: collects HIGH/CRITICAL incidents within a 5 s
+    // window per feeder and publishes a single FaultEvent to edge/fault_events.
+    let aggregator: Arc<FaultEventAggregator> = Arc::new(FaultEventAggregator::new(5));
 
     // ── MQTT client ───────────────────────────────────────────────────────────
     let mut mqttopts = MqttOptions::new("cep-engine-rust", &mqtt_host, mqtt_port);
@@ -80,10 +95,20 @@ async fn main() {
         .expect("Failed to subscribe to edge/events");
 
     info!("[CEP] Connected → subscribed to edge/events");
-    info!("[CEP] Publishes → edge/incidents");
+    info!("[CEP] Publishes → edge/incidents  (all incidents, dashboard)");
+    info!("[CEP] Publishes → edge/fault_events  (aggregated, LLM service)");
 
-    // ── CommsLoss background task ─────────────────────────────────────────────
-    comms_loss::spawn(client.clone(), Arc::clone(&window), site_id.clone());
+    // ── Background tasks ──────────────────────────────────────────────────────
+    // CommsLoss monitor — fires COMMS_LOSS if no telemetry in 15 s
+    comms_loss::spawn(
+        client.clone(),
+        Arc::clone(&window),
+        Arc::clone(&suppression),
+        site_id.clone(),
+    );
+
+    // Aggregator flusher — drains 5 s windows and publishes FaultEvents
+    aggregator::spawn_flusher(Arc::clone(&aggregator), client.clone());
 
     // ── Main event loop ───────────────────────────────────────────────────────
     loop {
@@ -99,11 +124,18 @@ async fn main() {
                 };
 
                 let incidents = rules::evaluate(
-                    &event, &rules, &window, &dedup, &site_id,
+                    &event, &rules, &window, &dedup, &site_id, &suppression, &sustained,
                 );
 
-                for incident in &incidents {
-                    match serde_json::to_string(incident) {
+                for incident in incidents {
+                    // Determine aggregation eligibility before any borrows
+                    let is_high_or_critical = matches!(
+                        incident.payload.severity.as_str(),
+                        "HIGH" | "CRITICAL"
+                    );
+
+                    // Publish to edge/incidents — dashboard receives all incidents
+                    match serde_json::to_string(&incident) {
                         Ok(payload) => {
                             if let Err(e) = client
                                 .publish("edge/incidents", QoS::AtLeastOnce, false, payload)
@@ -121,6 +153,13 @@ async fn main() {
                             }
                         }
                         Err(e) => error!("[CEP] Failed to serialise incident: {}", e),
+                    }
+
+                    // Feed HIGH/CRITICAL incidents into the 5 s aggregation window.
+                    // The flusher task drains expired windows into a single FaultEvent
+                    // published to edge/fault_events for the LLM service.
+                    if is_high_or_critical {
+                        aggregator.add(incident);
                     }
                 }
             }

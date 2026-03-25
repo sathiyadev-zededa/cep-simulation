@@ -10,10 +10,12 @@
 
 use crate::config::{Rule, RulesFile};
 use crate::dedup::IncidentDedup;
+use crate::suppression::FaultSuppression;
+use crate::sustained::SustainedTracker;
 use crate::types::{EdgeEvent, Incident};
 use crate::window::WindowBuffer;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Load and sort rules from a YAML file.
 /// Panics with a clear message if the file is missing or malformed.
@@ -44,25 +46,52 @@ pub fn load_rules(path: &str) -> Vec<Rule> {
 
 /// Evaluate all loaded rules against one incoming event.
 /// Returns a Vec of incidents to publish (may be empty).
+///
+/// Suppression logic:
+///   - If a CRITICAL incident fires for feeder X, that feeder is suppressed
+///     for 60 seconds — all subsequent non-CRITICAL rules are skipped.
+///   - This ensures a single root-cause incident per fault click, not a
+///     cascade of voltage/frequency/temperature incidents alongside it.
 pub fn evaluate(
-    event:   &EdgeEvent,
-    rules:   &[Rule],
-    window:  &Arc<WindowBuffer>,
-    dedup:   &Arc<IncidentDedup>,
-    site_id: &str,
+    event:       &EdgeEvent,
+    rules:       &[Rule],
+    window:      &Arc<WindowBuffer>,
+    dedup:       &Arc<IncidentDedup>,
+    site_id:     &str,
+    suppression: &Arc<FaultSuppression>,
+    sustained:   &Arc<SustainedTracker>,
 ) -> Vec<Incident> {
     let mut out = Vec::new();
+    let feeder = event.feeder();
 
     // Track telemetry heartbeat per feeder (used by CommsLossTracker)
     if event.event_type == "telemetry" {
-        window.add(&event.feeder(), "telemetry");
+        window.add(&feeder, "telemetry");
+    }
+
+    // If this feeder is currently suppressed by a recent CRITICAL incident,
+    // skip noise events (voltage, frequency, temperature, comms) but still
+    // allow relay_trip and breaker_open — these are protection operations
+    // directly caused by the fault and should produce their own incidents.
+    let suppressed = suppression.is_suppressed(&feeder);
+    if suppressed && event.event_type != "relay_trip" && event.event_type != "breaker_open" {
+        warn!("[CEP] Feeder {} suppressed — skipping {} event", feeder, event.event_type);
+        return out;
     }
 
     for rule in rules {
         debug!("[CEP] checking [{:02}] {} on {}", rule.priority, rule.id, event.event_type);
 
-        if let Some(incident) = rule.evaluate(event, window, dedup, site_id) {
+        if let Some(incident) = rule.evaluate(event, window, dedup, sustained, site_id) {
             let early = rule.early_return;
+
+            // If this is a CRITICAL incident, suppress the feeder so
+            // secondary rules (voltage quality, frequency, temp) don't fire.
+            if incident.payload.severity == "CRITICAL" {
+                suppression.suppress(&feeder);
+                info!("[CEP] CRITICAL fired for feeder {} — suppressing secondary rules for 60s", feeder);
+            }
+
             out.push(incident);
             if early {
                 debug!("[CEP] early_return after rule {}", rule.id);

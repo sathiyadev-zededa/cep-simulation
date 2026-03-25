@@ -53,11 +53,8 @@ wait_for() {
 }
 
 # ── Step 1: Wait for MQTT broker ──────────────────────────────────────────────
-# Use /dev/tcp to check TCP port — available in sh without extra tools.
-# Falls back gracefully if broker is slow to start.
-#wait_for "MQTT broker (${MQTT_HOST}:${MQTT_PORT})" \
-#    "curl -sf --max-time 3 telnet://${MQTT_HOST}:${MQTT_PORT}"
-python3 -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('mqtt-broker', 1883)); s.close()"
+wait_for "MQTT broker (${MQTT_HOST}:${MQTT_PORT})" \
+    "python3 -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('${MQTT_HOST}', ${MQTT_PORT})); s.close()\""
 
 
 # ── Step 2: Wait for Ollama API ───────────────────────────────────────────────

@@ -42,14 +42,14 @@ rules:
     description: "Busbar differential (87B) or breaker failure (50BF) relay operated"
     on: relay_trip
     where:
-      relay_code:
+      code:
         in: ["87B", "50BF"]
     fire:
       type: BUSBAR_FAULT
       severity: CRITICAL
       confidence: 0.95
-      message: "Busbar protection relay {relay_code} operated on {feeder_id} — possible busbar fault"
-      relay_codes_from: relay_code
+      message: "Busbar protection relay {code} operated on {feeder_id} — possible busbar fault"
+      relay_codes_from: code
     early_return: true
 
   # ── Priority 2: Transformer fault ────────────────────────────────────────
@@ -58,14 +58,14 @@ rules:
     description: "Transformer differential (87T) or gas relay (63) operated"
     on: relay_trip
     where:
-      relay_code:
+      code:
         in: ["87T", "63"]
     fire:
       type: TRANSFORMER_FAULT
       severity: CRITICAL
       confidence: 0.92
-      message: "Transformer protection relay {relay_code} operated on {feeder_id} — differential or gas relay"
-      relay_codes_from: relay_code
+      message: "Transformer protection relay {code} operated on {feeder_id} — differential or gas relay"
+      relay_codes_from: code
     early_return: true
 
   # ── Priority 3: Distance / cable fault ───────────────────────────────────
@@ -74,14 +74,14 @@ rules:
     description: "Distance (21) or directional overcurrent (67) relay — cable insulation fault"
     on: relay_trip
     where:
-      relay_code:
+      code:
         in: ["21", "67"]
     fire:
       type: CABLE_FAULT
       severity: HIGH
       confidence: 0.88
-      message: "Distance relay {relay_code} operated on {feeder_id} — possible cable insulation fault"
-      relay_codes_from: relay_code
+      message: "Distance relay {code} operated on {feeder_id} — possible cable insulation fault"
+      relay_codes_from: code
       fault_scenario: CABLE_INSULATION_FAILURE
 
   # ── Priority 4: Overcurrent ───────────────────────────────────────────────
@@ -90,25 +90,27 @@ rules:
     description: "Overcurrent relay (50/51) operated"
     on: relay_trip
     where:
-      relay_code:
+      code:
         in: ["50", "51", "50/51"]
     fire:
       type: RELAY_TRIP
       severity: HIGH
       confidence: 0.85
-      message: "Overcurrent relay {relay_code} operated on {feeder_id}"
-      relay_codes_from: relay_code
+      message: "Overcurrent relay {code} operated on {feeder_id}"
+      relay_codes_from: code
 
   # ── Priority 5: Breaker lockout ───────────────────────────────────────────
+  # Simulator sends breaker_open{reason:"reclose_failed"} for each failed attempt
   - id: breaker_lockout
     priority: 5
     description: "Permanent fault — breaker locked out after multiple failed reclosures"
-    on: breaker_reclose
+    on: breaker_open
     where:
-      success: false
+      reason:
+        eq: "reclose_failed"
     window:
       bucket: reclose_fail
-      seconds: 30
+      seconds: 60
       count_gte: 3
     fire:
       type: PERMANENT_FAULT
@@ -119,12 +121,14 @@ rules:
     clear_window_on_fire: true
 
   # ── Priority 6: Reclose success ───────────────────────────────────────────
+  # Simulator sends breaker_close{reason:"reclose_success"} on recovery
   - id: reclose_success
     priority: 6
     description: "Auto-reclose successful — transient fault cleared"
-    on: breaker_reclose
+    on: breaker_close
     where:
-      success: true
+      reason:
+        eq: "reclose_success"
     fire:
       type: RECLOSE_SUCCESS
       severity: LOW
@@ -141,7 +145,7 @@ rules:
       type: EQUIPMENT_OFFLINE
       severity: HIGH
       confidence: 0.88
-      message: "Equipment offline: {asset} removed from service on {feeder_id}"
+      message: "Equipment offline: {equipment_id} removed from service on {feeder_id}"
 
   # ── Priority 8: Zone isolation ────────────────────────────────────────────
   - id: zone_isolation
@@ -160,23 +164,40 @@ rules:
     description: "Transformer operating above rated load (>105% = HIGH, >120% = CRITICAL)"
     on: telemetry
     where:
-      load_pct:
+      tx_load_pct:
         gt: 105.0
     fire:
       type: TRANSFORMER_OVERLOAD
       severity: HIGH
       confidence: 0.85
-      message: "Transformer {transformer_id} load warning: {load_pct}% of rated capacity on {feeder_id}"
+      message: "Transformer {equipment_id} load warning: {tx_load_pct}% of rated capacity on {feeder_id} — oil temp {tx_temp_c}°C"
       escalate:
         - when:
-            load_pct:
+            tx_load_pct:
               gt: 120.0
           severity: CRITICAL
           confidence: 0.92
 
-  # ── Priority 10: Pre-fault warning ───────────────────────────────────────
-  - id: pre_fault_warning
+  # ── Priority 9b: Transformer temperature warning ──────────────────────────
+  - id: transformer_temperature
     priority: 10
+    description: "Transformer oil temperature exceeding safe operating limit (>90°C = WARNING, >110°C = CRITICAL)"
+    on: temperature_warning
+    fire:
+      type: TRANSFORMER_TEMPERATURE
+      severity: HIGH
+      confidence: 0.90
+      message: "Transformer {equipment_id} temperature alarm: {temperature_c}°C on {feeder_id}"
+      escalate:
+        - when:
+            temperature_c:
+              gt: 110.0
+          severity: CRITICAL
+          confidence: 0.95
+
+  # ── Priority 11: Pre-fault warning ───────────────────────────────────────
+  - id: pre_fault_warning
+    priority: 11
     description: "Pre-fault condition — voltage sag >10% or current spike >20%"
     on: telemetry
     where:
@@ -191,9 +212,9 @@ rules:
       confidence: 0.70
       message: "Pre-fault condition on {feeder_id}: voltage sag {v_sag_pct}% / current spike {i_spike_pct}%"
 
-  # ── Priority 11: Voltage quality ──────────────────────────────────────────
+  # ── Priority 12: Voltage quality ──────────────────────────────────────────
   - id: voltage_quality
-    priority: 11
+    priority: 12
     description: "Repeated harmonic distortion events (3+ in 60s)"
     on: voltage_harmonics
     window:
@@ -206,20 +227,20 @@ rules:
       confidence: 0.75
       message: "Repeated voltage harmonic events on {feeder_id}: {window_count} occurrences in 60s"
 
-  # ── Priority 12: Lightning impact ─────────────────────────────────────────
+  # ── Priority 13: Lightning impact ─────────────────────────────────────────
   - id: lightning_impact
-    priority: 12
+    priority: 13
     description: "Lightning strike detected — possible surge damage"
-    on: lightning_strike
+    on: weather_lightning
     fire:
       type: LIGHTNING_IMPACT
       severity: HIGH
       confidence: 0.80
       message: "Lightning strike detected on {feeder_id}: {strike_kA} kA — possible surge damage"
 
-  # ── Priority 13: Frequency deviation ─────────────────────────────────────
+  # ── Priority 14: Frequency deviation ─────────────────────────────────────
   - id: frequency_deviation
-    priority: 13
+    priority: 14
     description: "Repeated frequency deviation events (2+ in 60s)"
     on: frequency_deviation
     window:
@@ -230,4 +251,68 @@ rules:
       type: FREQUENCY_DEVIATION
       severity: MEDIUM
       confidence: 0.72
-      message: "Repeated frequency deviation on {feeder_id}: {freq_hz} Hz ({window_count} events in 60s)"
+      message: "Repeated frequency deviation on {feeder_id}: {frequency_hz} Hz ({window_count} events in 60s)"
+
+  # ── Priority 15: Transformer overheating sustained (Pattern A) ───────────
+  # Fires when temperature_warning events arrive continuously for 3 seconds
+  # (compressed demo timing — in production set for_secs: 900 = 15 min).
+  # Demonstrates CEP Pattern A: sustained condition threshold.
+  - id: transformer_overheating_sustained
+    priority: 15
+    description: "Pattern A: Temperature alarm sustained for 60s — chronic overheating confirmed"
+    on: temperature_warning
+    sustained:
+      key: tx_temp_high
+      for_secs: 60
+    fire:
+      type: TRANSFORMER_OVERHEATING_SUSTAINED
+      severity: HIGH
+      confidence: 0.90
+      message: "Transformer chronic overheating confirmed on {feeder_id} — temperature alarm sustained for 60+ seconds, current reading {temperature_c}°C"
+
+  # ── Priority 17: Severe grid disturbance ─────────────────────────────────
+  # Fires when BOTH frequency < 49.5 Hz AND voltage < 0.95 pu (10.45 kV)
+  # are observed in at least 2 telemetry readings within a 2-second window.
+  # The 2-reading filter prevents a single anomalous sample from triggering.
+  # This is the ONLY rule that combines two different grid health indicators.
+  - id: severe_grid_disturbance
+    priority: 17
+    description: "Frequency < 49.5 Hz AND voltage < 0.95 pu — simultaneous grid disturbance in 2s window"
+    on: telemetry
+    where:
+      frequency_hz:
+        lt: 49.5
+      v_kv:
+        lt: 10.45
+    window:
+      bucket: grid_disturbance
+      seconds: 2
+      count_gte: 2
+    fire:
+      type: SEVERE_GRID_DISTURBANCE
+      severity: CRITICAL
+      confidence: 0.93
+      message: "Severe grid disturbance on {feeder_id}: frequency {frequency_hz} Hz and voltage {v_kv} kV (below 0.95 pu) — simultaneous under-frequency and under-voltage"
+    clear_window_on_fire: true
+
+  # ── Priority 16: Repeated transient fault (Pattern B) ────────────────────
+  # Fires when 2+ overcurrent relay trips occur within 30 seconds.
+  # Fires before the breaker_lockout rule (which needs 3 failed reclosures),
+  # providing early warning of a recurring fault pattern.
+  # Demonstrates CEP Pattern B: repeated events in sliding window.
+  - id: repeated_transient_fault
+    priority: 16
+    description: "Pattern B: 2+ overcurrent relay trips in 30s — recurring transient fault"
+    on: relay_trip
+    where:
+      code:
+        in: ["50", "51", "50/51"]
+    window:
+      bucket: oc_trips
+      seconds: 30
+      count_gte: 2
+    fire:
+      type: REPEATED_TRANSIENT_FAULT
+      severity: HIGH
+      confidence: 0.82
+      message: "Recurring transient faults on {feeder_id}: {window_count} overcurrent relay trips in 30s — possible intermittent fault"

@@ -65,14 +65,14 @@ spec:
               mountPath: {{ .Values.llmService.chromaPath }}
           readinessProbe:
             exec:
-              # Service is ready when it has connected to MQTT
+              # Service is ready when it can reach the MQTT broker
               command:
                 - python
                 - -c
-                - "import socket; socket.setdefaulttimeout(3); socket.socket().connect(('{{ .Values.mqttHost }}', {{ .Values.mqttPort }}))"
-            initialDelaySeconds: 15
+                - "import socket; s=socket.socket(); s.settimeout(3); s.connect(('{{ .Values.mqttHost }}', {{ .Values.mqttPort }})); s.close()"
+            initialDelaySeconds: 30
             periodSeconds: 10
-            failureThreshold: 3
+            failureThreshold: 6
       volumes:
         - name: chromadb-data
           persistentVolumeClaim:

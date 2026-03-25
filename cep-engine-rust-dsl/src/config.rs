@@ -8,6 +8,7 @@
 //   - Rule::evaluate() which runs one rule against one event
 
 use crate::dedup::IncidentDedup;
+use crate::sustained::SustainedTracker;
 use crate::types::{EdgeEvent, Incident, IncidentPayload};
 use crate::window::WindowBuffer;
 use serde::Deserialize;
@@ -41,6 +42,18 @@ pub struct Rule {
     /// Stop evaluating lower-priority rules after this one fires
     #[serde(default)]
     pub early_return: bool,
+    /// Pattern A: require condition to be continuously true for N seconds
+    #[serde(default)]
+    pub sustained: Option<SustainedConfig>,
+}
+
+/// Pattern A configuration — sustained condition threshold
+#[derive(Debug, Deserialize)]
+pub struct SustainedConfig {
+    /// Unique key scoped per feeder (e.g. "tx_temp_high")
+    pub key:      String,
+    /// How long the condition must be continuously true before firing
+    pub for_secs: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,10 +94,11 @@ impl Rule {
     /// Returns Some(Incident) if the rule fires, None otherwise.
     pub fn evaluate(
         &self,
-        event:   &EdgeEvent,
-        window:  &Arc<WindowBuffer>,
-        dedup:   &Arc<IncidentDedup>,
-        site_id: &str,
+        event:     &EdgeEvent,
+        window:    &Arc<WindowBuffer>,
+        dedup:     &Arc<IncidentDedup>,
+        sustained: &Arc<SustainedTracker>,
+        site_id:   &str,
     ) -> Option<Incident> {
 
         // 1. event_type gate
@@ -92,14 +106,32 @@ impl Rule {
             return None;
         }
 
+        let feeder = event.feeder();
+
         // 2. WHERE conditions
-        if !self.conditions.is_empty() && !matches_where(&self.conditions, event) {
+        let conditions_met = self.conditions.is_empty()
+            || matches_where(&self.conditions, event);
+
+        // 3. Pattern A: sustained condition tracking
+        //    Call observe() regardless of whether conditions passed — a false
+        //    observation resets the continuity clock for this feeder+key.
+        if let Some(sus) = &self.sustained {
+            sustained.observe(&feeder, &sus.key, conditions_met);
+            if !conditions_met
+                || !sustained.has_persisted(&feeder, &sus.key, sus.for_secs)
+            {
+                return None;
+            }
+            // Condition has been sustained long enough — reset the clock
+            // so the rule won't fire again until the condition breaks and
+            // restarts for another full `for_secs` period.
+            sustained.clear(&feeder, &sus.key);
+        } else if !conditions_met {
             return None;
         }
 
-        // 3. Window accumulation + threshold check
-        let feeder        = event.feeder();
-        let window_count  = if let Some(win) = &self.window {
+        // 4. Window accumulation + threshold check (Pattern B)
+        let window_count = if let Some(win) = &self.window {
             window.add(&feeder, &win.bucket);
             let n = window.count_within(&feeder, &win.bucket, win.seconds);
             debug!("[{}] window {}/{} feeder={}", self.id, n, win.count_gte, feeder);
@@ -111,13 +143,13 @@ impl Rule {
             0
         };
 
-        // 4. Dedup / cooldown
+        // 5. Dedup / cooldown
         if !dedup.should_fire(&self.fire.incident_type, &feeder) {
             debug!("[{}] dedup suppressed feeder={}", self.id, feeder);
             return None;
         }
 
-        // 5. Clear window bucket if configured
+        // 6. Clear window bucket if configured
         if self.clear_window_on_fire {
             if let Some(win) = &self.window {
                 window.clear_bucket(&feeder, &win.bucket);

@@ -14,7 +14,7 @@
 #   MQTT → on_event() / on_incident()
 #              ↓
 #         EventBuffer (10s rolling window)
-#         IncidentMemory (ChromaDB vector store)
+#         IncidentMemory (fastembed + numpy vector store)
 #              ↓
 #         Ollama (local LLM — llama3.2 / mistral / phi3)
 #              ↓
@@ -59,10 +59,11 @@ _PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
 MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
-TOPIC_EVENTS    = "edge/events"
-TOPIC_INCIDENTS = "edge/incidents"
-TOPIC_SUMMARIES = "edge/summaries"
-TOPIC_REPORTS   = "edge/reports"
+TOPIC_EVENTS       = "edge/events"
+TOPIC_INCIDENTS    = "edge/incidents"
+TOPIC_FAULT_EVENTS = "edge/fault_events"   # aggregated CEP fault events (new)
+TOPIC_SUMMARIES    = "edge/summaries"
+TOPIC_REPORTS      = "edge/reports"
 
 OLLAMA_HOST  = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
@@ -178,20 +179,18 @@ class IncidentMemory:
         Returns the document ID.
         """
         doc_id = f"inc-{uuid.uuid4().hex}"
-
-        # Build a rich text representation for embedding
         doc_text = self._incident_to_text(incident, report)
 
         self._collection.add(
             documents=[doc_text],
             metadatas=[{
-                "incident_type": incident.get("payload", {}).get("incident_type", "UNKNOWN"),
-                "confidence":    str(incident.get("payload", {}).get("confidence", 0)),
-                "site_id":       incident.get("site_id", SITE_ID),
-                "feeder_id":     incident.get("feeder_id", ""),
+                "incident_type":  incident.get("payload", {}).get("incident_type", "UNKNOWN"),
+                "confidence":     str(incident.get("payload", {}).get("confidence", 0)),
+                "site_id":        incident.get("site_id", SITE_ID),
+                "feeder_id":      incident.get("feeder_id", ""),
                 "transformer_id": incident.get("transformer_id", ""),
-                "ts_ms":         str(incident.get("ts_ms", now_ms())),
-                "timestamp_iso": now_iso(),
+                "ts_ms":          str(incident.get("ts_ms", now_ms())),
+                "timestamp_iso":  now_iso(),
             }],
             ids=[doc_id],
         )
@@ -219,7 +218,6 @@ class IncidentMemory:
                 results["metadatas"][0],
                 results["distances"][0],
             ):
-                # Only include if meaningfully similar (cosine distance < 0.8)
                 if dist < 0.8:
                     similar.append({"text": doc, "metadata": meta, "distance": dist})
             return similar
@@ -483,13 +481,176 @@ def build_report_prompt(
     return system, user
 
 
+def build_fault_report_prompt(
+    fault_event: Dict,
+    similar: List[Dict],
+    recent_events: List[Dict],
+    recent_incidents: List[Dict],
+) -> tuple[str, str]:
+    """Build a temporal-narrative prompt for an aggregated FaultEvent.
+
+    Produces a report describing the full progression of the fault —
+    which incidents fired, in what order, how telemetry values changed —
+    rather than just a snapshot of the final state.
+    """
+
+    system = (
+        "You are a senior power systems engineer and incident analyst at a distribution substation. "
+        "You write precise, technical incident reports based on CEP (Complex Event Processing) data. "
+        "Your strength is describing HOW a fault developed over time — the sequence of events, "
+        "the rate of change in readings, and the causal chain from first signal to final alarm. "
+        "Write in clear prose. Be specific about timestamps and values. Avoid generic filler text."
+    )
+
+    root_cause = fault_event.get("root_cause", "UNKNOWN")
+    severity   = fault_event.get("severity", "UNKNOWN")
+    confidence = fault_event.get("confidence", 0.0)
+    message    = fault_event.get("message", "")
+    feeder_id  = fault_event.get("feeder_id", "N/A")
+    factors    = fault_event.get("contributing_factors", [])
+    inc_count  = fault_event.get("incident_count", 1)
+    fault_ts   = fault_event.get("ts_ms", 0)
+    fault_iso  = datetime.utcfromtimestamp(fault_ts / 1000).strftime("%H:%M:%SZ") if fault_ts else "unknown"
+
+    # CEP pattern context
+    if "SUSTAINED" in root_cause:
+        pattern_desc = (
+            "CEP Pattern A — Sustained Condition: the fault condition persisted continuously "
+            "for 60+ seconds before this alarm fired. This is NOT a transient spike. "
+            "Describe the gradual progression visible in the telemetry timeline below."
+        )
+    elif "REPEATED" in root_cause or "TRANSIENT" in root_cause:
+        pattern_desc = (
+            "CEP Pattern B — Repeated Events: the same fault occurred multiple times "
+            "within a short window, indicating a recurring/intermittent fault."
+        )
+    elif "LOCKOUT" in root_cause or "PERMANENT" in root_cause:
+        pattern_desc = (
+            "CEP Pattern B — Breaker Lockout: multiple failed auto-reclose attempts "
+            "confirm a permanent fault on the feeder."
+        )
+    else:
+        pattern_desc = (
+            "CEP Aggregated Fault: multiple correlated incidents were grouped into "
+            "a single root-cause event by the edge CEP engine."
+        )
+
+    fault_block = (
+        f"FAULT EVENT\n"
+        f"  Root Cause:           {root_cause}\n"
+        f"  Severity:             {severity}\n"
+        f"  Confidence:           {confidence * 100:.0f}%\n"
+        f"  Final Message:        {message}\n"
+        f"  Feeder:               {feeder_id}\n"
+        f"  Site:                 {SITE_ID}\n"
+        f"  Alarm Time:           {fault_iso}\n"
+        f"  Contributing Factors: {', '.join(factors) if factors else 'none'}\n"
+        f"  Total Incidents:      {inc_count}\n"
+        f"\nCEP DETECTION PATTERN:\n  {pattern_desc}\n"
+    )
+
+    # ── Incident timeline ──────────────────────────────────────────────────────
+    timeline_block = ""
+    if recent_incidents:
+        sorted_incidents = sorted(
+            recent_incidents,
+            key=lambda e: e.get("ts_ms", e.get("payload", {}).get("ts_ms", 0))
+        )
+        lines = []
+        for inc in sorted_incidents:
+            p       = inc.get("payload", {})
+            ts      = inc.get("ts_ms", 0)
+            iso     = datetime.utcfromtimestamp(ts / 1000).strftime("%H:%M:%SZ") if ts else "?"
+            inc_type = p.get("incident_type", "?")
+            sev     = p.get("severity", "?")
+            summary = p.get("summary", "")
+            lines.append(f"  {iso}  [{sev:8s}]  {inc_type}  —  {summary}")
+        timeline_block = (
+            "\nINCIDENT TIMELINE (chronological — use this to describe the fault progression):\n"
+            + "\n".join(lines) + "\n"
+        )
+
+    # ── Raw telemetry trend ────────────────────────────────────────────────────
+    event_block = ""
+    if recent_events:
+        lines = []
+        for e in recent_events:
+            p     = e.get("payload", {})
+            ts    = e.get("ts_ms", 0)
+            iso   = datetime.utcfromtimestamp(ts / 1000).strftime("%H:%M:%SZ") if ts else "?"
+            etype = e.get("event_type", "?")
+            if etype == "telemetry":
+                summary = (
+                    f"load={p.get('tx_load_pct','?')}%  "
+                    f"temp={p.get('tx_temp_c','?')}°C  "
+                    f"v={p.get('v_kv','?')}kV"
+                )
+            elif etype == "temperature_warning":
+                summary = (
+                    f"temp={p.get('temperature_c','?')}°C  "
+                    f"rate={p.get('rate_degC_per_min','?')}°C/min  "
+                    f"equip={p.get('equipment_id','?')}"
+                )
+            else:
+                continue
+            lines.append(f"  {iso}  [{etype}]  {e.get('feeder_id','')}  {summary}")
+        if lines:
+            event_block = (
+                "\nRAW TELEMETRY READINGS (use to quantify the rate of change):\n"
+                + "\n".join(lines) + "\n"
+            )
+
+    # ── RAG context ────────────────────────────────────────────────────────────
+    if similar:
+        rag_lines = []
+        for i, s in enumerate(similar, 1):
+            meta = s.get("metadata", {})
+            rag_lines.append(
+                f"\n  Past Incident {i} "
+                f"(similarity: {(1 - s.get('distance', 1)) * 100:.0f}%, "
+                f"recorded: {meta.get('timestamp_iso', 'unknown')}):\n"
+                + "\n".join(f"    {line}" for line in s["text"].split("\n")[:10])
+            )
+        rag_block = "\nSIMILAR PAST INCIDENTS (for historical comparison):\n" + "".join(rag_lines)
+    else:
+        rag_block = "\nSIMILAR PAST INCIDENTS: None on record yet — this is the first occurrence."
+
+    user = (
+        f"{fault_block}"
+        f"{timeline_block}"
+        f"{event_block}"
+        f"{rag_block}"
+        "\n\nWrite a technical incident report with EXACTLY these sections. "
+        "Use specific timestamps and values from the data above. "
+        "Do NOT use generic placeholder text.\n\n"
+        "**1. FAULT ORIGIN & PROGRESSION**\n"
+        "Describe how the fault developed over time. Reference the incident timeline — "
+        "what fired first, what followed, how readings changed. "
+        "If Pattern A, explicitly describe the sustained nature and rate of change.\n\n"
+        "**2. ROOT CAUSE**\n"
+        "State the most likely root cause in one or two sentences.\n\n"
+        "**3. ASSET & CUSTOMER IMPACT**\n"
+        "Which transformer/feeder is affected and what is the risk to customers.\n\n"
+        "**4. IMMEDIATE ACTIONS (priority order)**\n"
+        "Numbered list of operator steps to take right now.\n\n"
+        "**5. HISTORICAL COMPARISON**\n"
+        "Compare to similar past incidents if available, otherwise state first occurrence.\n\n"
+        "**6. PREVENTIVE MEASURES**\n"
+        "One or two specific actions to prevent recurrence.\n\n"
+        "Keep the total report under 500 words."
+    )
+
+    return system, user
+
+
 # ─── LLM SERVICE ─────────────────────────────────────────────────────────────
 
 class LLMService:
     def __init__(self):
-        self.buffer  = EventBuffer(max_age_s=120.0)
-        self.memory  = IncidentMemory(persist_path=CHROMA_PATH)
-        self.llm     = OllamaClient(host=OLLAMA_HOST, model=OLLAMA_MODEL)
+        self.buffer          = EventBuffer(max_age_s=180.0)   # raw telemetry/events
+        self.incident_buffer = EventBuffer(max_age_s=180.0)   # CEP incidents — used to build fault timeline
+        self.memory          = IncidentMemory(persist_path=CHROMA_PATH)
+        self.llm             = OllamaClient(host=OLLAMA_HOST, model=OLLAMA_MODEL)
         self.client: Optional[mqtt.Client] = None
 
         self._last_summary_t = time.time()
@@ -513,19 +674,116 @@ class LLMService:
                     daemon=True,
                 ).start()
 
-    def on_incident(self, incident: Dict) -> None:
-        """Called for every message on edge/incidents."""
-        print(f"[SERVICE] Incident received: {incident.get('payload', {}).get('incident_type')}")
+    def on_fault_event(self, fault_event: Dict) -> None:
+        """Called for every aggregated FaultEvent on edge/fault_events.
 
-        # Snapshot recent events for report context (non-destructive peek)
-        recent_events = self.buffer.peek(last_n_s=30.0)
+        FaultEvents are the ONLY trigger for LLM reports. Individual incidents
+        are buffered (on_incident) so their timeline is available here, but do
+        NOT generate their own reports.
+        """
+        root_cause = fault_event.get("root_cause", "UNKNOWN")
+        severity   = fault_event.get("severity", "LOW")
+        feeder_id  = fault_event.get("feeder_id", "?")
+        print(f"[SERVICE] FaultEvent received: {root_cause} | {severity} | feeder={feeder_id}")
 
-        # Run report generation in background thread so MQTT loop is not blocked
+        # Only generate full reports for HIGH and CRITICAL fault events
+        if severity not in ("HIGH", "CRITICAL"):
+            print(f"[SERVICE] Skipping report for {severity} fault event")
+            return
+
+        # Capture full 120s window of raw telemetry + all recent incidents
+        recent_events    = self.buffer.peek(last_n_s=120.0)
+        recent_incidents = self.incident_buffer.peek(last_n_s=120.0)
+
         threading.Thread(
-            target=self._generate_report,
-            args=(incident, recent_events),
+            target=self._generate_fault_report,
+            args=(fault_event, recent_events, recent_incidents),
             daemon=True,
         ).start()
+
+    def on_incident(self, incident: Dict) -> None:
+        """Buffer the incident for fault event timeline context.
+
+        Individual incident reports are NOT generated here — the LLM only
+        reports on aggregated FaultEvents (edge/fault_events). Buffering
+        incidents lets the fault report describe the full temporal sequence.
+        """
+        inc_type = incident.get("payload", {}).get("incident_type", "UNKNOWN")
+        severity = incident.get("payload", {}).get("severity", "?")
+        print(f"[SERVICE] Incident buffered (no individual report): {inc_type} [{severity}]")
+        self.incident_buffer.add(incident)
+
+    # ── Fault event report generation ────────────────────────────────────────
+
+    def _generate_fault_report(self, fault_event: Dict, recent_events: List[Dict], recent_incidents: List[Dict]) -> None:
+        """Generate an LLM report from an aggregated FaultEvent."""
+        root_cause = fault_event.get("root_cause", "UNKNOWN")
+
+        # Step 1 — RAG: find similar past incidents
+        # Build a synthetic incident dict compatible with IncidentMemory.find_similar()
+        synthetic_incident = {
+            "payload": {
+                "incident_type": root_cause,
+                "severity":      fault_event.get("severity", "HIGH"),
+                "summary":       fault_event.get("message", ""),
+                "confidence":    fault_event.get("confidence", 0.0),
+            }
+        }
+        print(f"[RAG] Querying ChromaDB for incidents similar to {root_cause}...")
+        similar = self.memory.find_similar(synthetic_incident, n=RAG_TOP_K)
+        print(f"[RAG] Found {len(similar)} similar past incidents")
+
+        # Step 2 — Build prompt (uses temporal-aware fault event prompt)
+        system, user = build_fault_report_prompt(fault_event, similar, recent_events, recent_incidents)
+
+        # Step 3 — Generate with Ollama
+        print(f"[OLLAMA] Generating fault report for {root_cause}...")
+        report_text = self.llm.chat(system, user, max_tokens=1200)
+
+        if not report_text:
+            print("[OLLAMA] Failed to generate report — Ollama unavailable?")
+            report_text = (
+                f"Report generation failed. "
+                f"Fault: {root_cause} ({fault_event.get('severity')}). "
+                f"Summary: {fault_event.get('message', 'N/A')}. "
+                f"Contributing: {', '.join(fault_event.get('contributing_factors', []))}. "
+                f"Please check Ollama service."
+            )
+
+        # Step 4 — Store in ChromaDB for future RAG
+        doc_id = self.memory.store(synthetic_incident, report_text)
+
+        # Step 5 — Publish to edge/reports
+        factors   = fault_event.get("contributing_factors", [])
+        payload = {
+            "incident_type":     root_cause,
+            "confidence":        fault_event.get("confidence", 0.0),
+            "incident_summary":  fault_event.get("message", ""),
+            "report":            report_text,
+            "rag_context_used":  len(similar),
+            "similar_incidents": [
+                {
+                    "type":       s["metadata"].get("incident_type"),
+                    "recorded":   s["metadata"].get("timestamp_iso"),
+                    "similarity": f"{(1 - s.get('distance', 1)) * 100:.0f}%",
+                }
+                for s in similar
+            ],
+            "contributing_factors": factors,
+            "stored_as":         doc_id,
+            "generated_at":      now_iso(),
+            "model":             OLLAMA_MODEL,
+            "feeder_id":         fault_event.get("feeder_id", ""),
+            "site_id":           SITE_ID,
+            "cep_pattern":       "A" if "SUSTAINED" in root_cause else
+                                 "B" if "REPEATED" in root_cause or "TRANSIENT" in root_cause else
+                                 "CRITICAL",
+        }
+
+        print(f"[REPORT] {root_cause} → {report_text[:100]}...")
+
+        if self.client:
+            pub(self.client, TOPIC_REPORTS, "llm_report", payload)
 
     # ── Summary generation ────────────────────────────────────────────────────
 
@@ -634,7 +892,8 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
     if reason_code == 0:
         client.subscribe(TOPIC_EVENTS)
         client.subscribe(TOPIC_INCIDENTS)
-        print(f"[MQTT] Connected — subscribed to {TOPIC_EVENTS}, {TOPIC_INCIDENTS}")
+        client.subscribe(TOPIC_FAULT_EVENTS)
+        print(f"[MQTT] Connected — subscribed to {TOPIC_EVENTS}, {TOPIC_INCIDENTS}, {TOPIC_FAULT_EVENTS}")
     else:
         print(f"[MQTT] Connection failed with reason_code={reason_code}")
 
@@ -653,6 +912,9 @@ def on_message(client, userdata, msg):
 
     elif topic == TOPIC_INCIDENTS:
         service.on_incident(data)
+
+    elif topic == TOPIC_FAULT_EVENTS:
+        service.on_fault_event(data)
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ mqtt:
   servicePort: 1883
 
 dashboard:
-  image: commonpoc.azurecr.io/dashboard-ui-arm64:2.0
+  image: commonpoc.azurecr.io/dashboard-ui-arm64:2.0.1
   replicaCount: 1
   service:
     type: NodePort
@@ -11,11 +11,11 @@ dashboard:
     nodePort: 30080
 
 simulator:
-  image: commonpoc.azurecr.io/simulator-arm64:2.0
+  image: commonpoc.azurecr.io/simulator-arm64:3.0.0
   replicaCount: 1
 
 cep:
-  image: commonpoc.azurecr.io/cep_engine_rust_arm64:1.0.0
+  image: commonpoc.azurecr.io/cep_engine_rust_dsl_arm64:1.0.0
   replicaCount: 1
 
 mqttHost: mqtt-broker
@@ -34,29 +34,3 @@ imagePullSecret:
   dockerconfigjson: "eyJhdXRocyI6eyJjb21tb25wb2MuYXp1cmVjci5pbyI6eyJ1c2VybmFtZSI6ImNvbW1vbnBvYyIsInBhc3N3b3JkIjoiSkk4MDgzKz1Ob2VybGZlL0N1dThieW8yT3RCTHdSNXoiLCJhdXRoIjoiWTI5dGJXOXVjRzlqT2twSk9EQTRNeXM5VG05bGNteG1aUzlEZFhVNFlubHZNazkwUWt4M1VqVjYifX19"
 
 namespace: cep-edge
-
-ollama:
-  image: ollama/ollama:latest
-  storage: 10Gi
-
-gpu:
-  enabled: true
-  count: "1"
-
-resources:
-  requests:
-    cpu: "500m"
-    memory: "2Gi"
-  limits:
-    cpu: "2000m"
-    memory: "6Gi"
-
-llmService:
-  image: commonpoc.azurecr.io/llm_service:2.0.2
-  replicaCount: 1
-  ollamaHost: "http://ollama:11434"
-  ollamaModel: "phi3"
-  chromaPath: "/app/incident_store"
-  chromaStorage: 3Gi
-  siteId: "SUBSTATION-ABU-01"
-

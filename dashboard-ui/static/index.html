@@ -13,41 +13,89 @@
     .topbar {
       background: #1b4f8a;
       color: #fff;
-      padding: 12px 20px;
+      padding: 10px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
     }
-    .topbar h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+    .topbar h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: 0.5px; white-space: nowrap; }
+    .topbar .right { display: flex; align-items: center; gap: 14px; }
     .topbar .topics { font-size: 11px; opacity: 0.7; }
 
-    /* ── Scenario buttons ───────────────────────────────────────── */
+    /* ── Feeder selector ────────────────────────────────────────── */
+    .feeder-select {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.85);
+    }
+    .feeder-select label { font-weight: 600; white-space: nowrap; }
+    .feeder-select select {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .feeder-select select option { background: #1b4f8a; color: #fff; }
+
+    /* ── Scenario panel ─────────────────────────────────────────── */
     .scenarios {
       background: #fff;
-      padding: 12px 20px;
+      padding: 10px 20px;
+      border-bottom: 1px solid #dde3ec;
+    }
+    .scenario-row {
       display: flex;
+      align-items: center;
       gap: 8px;
       flex-wrap: wrap;
-      border-bottom: 1px solid #dde3ec;
-      align-items: center;
+      margin-bottom: 6px;
     }
-    .scenarios span { font-size: 12px; color: #666; margin-right: 4px; font-weight: 600; }
+    .scenario-row:last-child { margin-bottom: 0; }
+    .scenario-row .row-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      min-width: 72px;
+      color: #888;
+    }
+    .scenario-row .row-label.critical { color: #dc2626; }
+    .scenario-row .row-label.high     { color: #d97706; }
+    .scenario-row .row-label.temporal { color: #7c3aed; }
+
     button {
-      padding: 8px 14px;
+      padding: 7px 13px;
       border-radius: 8px;
       border: 1px solid #c5cfe0;
       background: #f4f7fb;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       color: #1b4f8a;
-      transition: background 0.15s;
+      transition: background 0.15s, border-color 0.15s;
     }
     button:hover { background: #dde8f5; border-color: #1b4f8a; }
-    button.active { background: #1b4f8a; color: #fff; border-color: #1b4f8a; }
+
+    .btn-critical { border-color: #fca5a5; color: #b91c1c; background: #fff5f5; }
+    .btn-critical:hover { background: #fee2e2; border-color: #dc2626; }
+    .btn-critical.active { background: #dc2626; color: #fff; border-color: #dc2626; }
+
+    .btn-high { border-color: #fcd34d; color: #92400e; background: #fffbeb; }
+    .btn-high:hover { background: #fef3c7; border-color: #d97706; }
+    .btn-high.active { background: #d97706; color: #fff; border-color: #d97706; }
+
+    .btn-temporal { border-color: #c4b5fd; color: #5b21b6; background: #faf5ff; }
+    .btn-temporal:hover { background: #ede9fe; border-color: #7c3aed; }
+    .btn-temporal.active { background: #7c3aed; color: #fff; border-color: #7c3aed; }
 
     /* ── Main layout ────────────────────────────────────────────── */
-    .main { padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+    .main { padding: 14px 20px; display: flex; flex-direction: column; gap: 14px; }
 
     /* ── Tab navigation ─────────────────────────────────────────── */
     .tabs { display: flex; gap: 4px; border-bottom: 2px solid #dde3ec; }
@@ -68,7 +116,6 @@
 
     /* ── Cards & grid ───────────────────────────────────────────── */
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
     .card {
       background: #fff;
       border: 1px solid #dde3ec;
@@ -76,7 +123,7 @@
       padding: 16px;
     }
     .card h3 { margin: 0 0 12px; font-size: 14px; color: #1b4f8a; font-weight: 700; }
-    .card h4 { margin: 12px 0 6px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .card h4 { margin: 12px 0 6px; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
 
     /* ── KPI tiles ──────────────────────────────────────────────── */
     .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
@@ -102,6 +149,75 @@
       font-size: 11px;
       max-height: 200px;
       margin: 0;
+    }
+
+    /* ── Fault Event cards ──────────────────────────────────────── */
+    .fault-card {
+      border: 1px solid #e4eaf3;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 10px;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      position: relative;
+    }
+    .fault-card .fc-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .fault-card .fc-type {
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .fault-card .fc-type.critical { color: #dc2626; }
+    .fault-card .fc-type.high     { color: #d97706; }
+    .fault-card .fc-type.medium   { color: #7c3aed; }
+    .fault-card .fc-type.low      { color: #16a34a; }
+    .fault-card .fc-time { font-size: 11px; color: #aaa; }
+    .fault-card .fc-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-left: 8px;
+    }
+    .fc-badge.critical { background: #fee2e2; color: #b91c1c; }
+    .fc-badge.high     { background: #fef3c7; color: #92400e; }
+    .fc-badge.medium   { background: #ede9fe; color: #5b21b6; }
+    .fc-badge.low      { background: #dcfce7; color: #166534; }
+    .fault-card .fc-msg { font-size: 13px; color: #333; margin-bottom: 8px; line-height: 1.5; }
+    .fault-card .fc-meta { font-size: 11px; color: #888; margin-bottom: 6px; }
+    .fault-card .fc-factors { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .fc-factor {
+      background: #f0f4fa;
+      border: 1px solid #dde3ec;
+      border-radius: 5px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: #4a5568;
+    }
+    .fault-card .fc-conf {
+      font-size: 11px;
+      color: #666;
+      margin-top: 6px;
+    }
+    .conf-bar {
+      height: 4px;
+      background: #e4eaf3;
+      border-radius: 2px;
+      margin-top: 3px;
+      overflow: hidden;
+    }
+    .conf-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+      transition: width 0.5s;
     }
 
     /* ── Incident cards ─────────────────────────────────────────── */
@@ -155,48 +271,22 @@
       align-items: flex-start;
       margin-bottom: 12px;
     }
-    .report-card .report-type {
-      font-size: 15px;
-      font-weight: 700;
-      color: #1b4f8a;
-    }
-    .report-card .report-meta {
-      font-size: 11px;
-      color: #888;
-      text-align: right;
-    }
+    .report-card .report-type { font-size: 15px; font-weight: 700; color: #1b4f8a; }
+    .report-card .report-meta { font-size: 11px; color: #888; text-align: right; }
     .report-card .report-summary {
-      font-size: 12px;
-      color: #555;
-      background: #f4f7fb;
-      border-radius: 6px;
-      padding: 8px 10px;
-      margin-bottom: 12px;
+      font-size: 12px; color: #555; background: #f4f7fb;
+      border-radius: 6px; padding: 8px 10px; margin-bottom: 12px;
     }
     .report-card .report-body {
-      font-size: 13px;
-      color: #2c3e50;
-      line-height: 1.7;
-      white-space: pre-wrap;
-      background: #fafbfd;
-      border: 1px solid #edf0f5;
-      border-radius: 8px;
-      padding: 12px;
-      max-height: 380px;
-      overflow-y: auto;
+      font-size: 13px; color: #2c3e50; line-height: 1.7;
+      white-space: pre-wrap; background: #fafbfd;
+      border: 1px solid #edf0f5; border-radius: 8px;
+      padding: 12px; max-height: 380px; overflow-y: auto;
     }
-    .report-card .rag-badges {
-      margin-top: 10px;
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
+    .report-card .rag-badges { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
     .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 99px;
-      font-size: 10px;
-      font-weight: 600;
+      display: inline-block; padding: 2px 8px;
+      border-radius: 99px; font-size: 10px; font-weight: 600;
     }
     .badge.blue  { background: #dbeafe; color: #1d4ed8; }
     .badge.teal  { background: #ccfbf1; color: #0f766e; }
@@ -218,32 +308,84 @@
     }
 
     /* ── Scrollable list ────────────────────────────────────────── */
-    .scroll-list { max-height: 320px; overflow-y: auto; }
+    .scroll-list { max-height: 380px; overflow-y: auto; }
 
     /* ── Empty state ────────────────────────────────────────────── */
     .empty { color: #aaa; font-size: 13px; padding: 20px 0; text-align: center; }
+
+    /* ── Counter chips ──────────────────────────────────────────── */
+    .chip {
+      display: inline-block;
+      background: #dc2626;
+      color: #fff;
+      border-radius: 99px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      margin-left: 5px;
+      vertical-align: middle;
+    }
   </style>
 </head>
 <body>
 
 <!-- ── Top bar ──────────────────────────────────────────────────────────── -->
 <div class="topbar">
-  <h1>⚡ Edge CEP Dashboard</h1>
-  <div class="topics">
-    <span class="status-dot" id="connDot"></span>
-    edge/events &nbsp;·&nbsp; edge/incidents &nbsp;·&nbsp; edge/reports &nbsp;·&nbsp; edge/summaries
+  <h1> ZEDEDA Edge CEP Dashboard — Substation ABU-01</h1>
+  <div class="right">
+    <div class="feeder-select">
+      <label>Feeder:</label>
+      <select id="feederSelect" onchange="onFeederChange(this.value)">
+        <option value="FEEDER-12">FEEDER-12 (TX-12)</option>
+        <option value="FEEDER-13">FEEDER-13 (TX-12)</option>
+        <option value="FEEDER-14">FEEDER-14 (TX-13)</option>
+      </select>
+    </div>
+    <div class="topics">
+      <span class="status-dot" id="connDot"></span>
+      edge/events &nbsp;·&nbsp; edge/fault_events &nbsp;·&nbsp; edge/reports
+    </div>
   </div>
 </div>
 
 <!-- ── Scenario buttons ─────────────────────────────────────────────────── -->
 <div class="scenarios">
-  <span>SCENARIO:</span>
-  <button onclick="sendCmd('normal 10',this)">Normal</button>
-  <button onclick="sendCmd('transient_fault 30',this)">Transient Fault</button>
-  <button onclick="sendCmd('permanent_fault 90',this)">Permanent Fault</button>
-  <button onclick="sendCmd('transformer_overload 120',this)">Transformer Overload</button>
-  <button onclick="sendCmd('weather_lightning 60',this)">Lightning</button>
-  <button onclick="sendCmd('comms_loss 30',this)">Comms Loss</button>
+
+  <!-- CRITICAL row -->
+  <div class="scenario-row">
+    <span class="row-label critical">⛔ Critical</span>
+    <button class="btn-critical" onclick="sendScenario('busbar_fault',this)"
+      title="87B relay operates — busbar differential fault">Busbar Fault</button>
+    <button class="btn-critical" onclick="sendScenario('transformer_fault',this)"
+      title="87T relay operates — internal winding fault">Transformer Fault</button>
+    <button class="btn-critical" onclick="sendScenario('line_fault_lockout',this)"
+      title="3× transient trips → breaker lockout (7 s)">Line Lockout</button>
+  </div>
+
+  <!-- HIGH row -->
+  <div class="scenario-row">
+    <span class="row-label high">⚠ High</span>
+    <button class="btn-high" onclick="sendScenario('cable_fault',this)"
+      title="Zone-2 distance relay — cable insulation fault">Cable Fault</button>
+    <button class="btn-high" onclick="sendScenario('lightning',this)"
+      title="Lightning strike near tower — 48.5 kA surge risk">Lightning Strike</button>
+  </div>
+
+  <!-- TEMPORAL row -->
+  <div class="scenario-row">
+    <span class="row-label temporal">⏱ Temporal</span>
+    <button class="btn-temporal" onclick="sendScenario('transformer_stress',this)"
+      title="Load rises → temp alarm fires → CEP confirms overload (Pattern E, 4 s)">TX Overload (Pattern E)</button>
+    <button class="btn-temporal" onclick="sendScenario('voltage_quality',this)"
+      title="3 harmonic events in 3 s — CEP fires on 3rd (Pattern B)">Voltage Quality (Pattern B)</button>
+    <button class="btn-temporal" onclick="sendScenario('frequency_deviation',this)"
+      title="2 frequency dips — CEP fires on 2nd (Pattern B)">Freq Deviation (Pattern B)</button>
+    <button class="btn-temporal" onclick="sendScenario('severe_grid_disturbance',this)"
+      title="Freq &lt; 49.5 Hz AND voltage &lt; 0.95 pu — 2 readings in 2s window (CRITICAL)">Severe Grid Disturbance</button>
+    <button class="btn-temporal" onclick="sendScenario('reclose_success',this)"
+      title="Transient clears on first reclose — LOW severity">Reclose Success</button>
+  </div>
+
 </div>
 
 <!-- ── Main ─────────────────────────────────────────────────────────────── -->
@@ -251,16 +393,40 @@
 
   <!-- Tab nav -->
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('telemetry',this)">Telemetry</div>
-    <div class="tab" onclick="switchTab('incidents',this)">Incidents</div>
-    <div class="tab" onclick="switchTab('llm',this)">LLM Intelligence <span id="reportBadge"></span></div>
+    <div class="tab active" onclick="switchTab('faults',this)">
+      Fault Events <span id="faultBadge"></span>
+    </div>
+    <div class="tab" onclick="switchTab('telemetry',this)">Telemetry</div>
+    <div class="tab" onclick="switchTab('incidents',this)">All Incidents</div>
+    <div class="tab" onclick="switchTab('llm',this)">
+      LLM Intelligence <span id="reportBadge"></span>
+    </div>
   </div>
 
-  <!-- ── Tab 1: Telemetry ──────────────────────────────────────────────── -->
-  <div class="tab-panel active" id="tab-telemetry">
+  <!-- ── Tab 1: Fault Events (primary) ─────────────────────────────────── -->
+  <div class="tab-panel active" id="tab-faults">
+    <div class="grid2">
+
+      <!-- Left: Fault event feed -->
+      <div class="card" style="grid-column: 1 / 3;">
+        <h3>Aggregated Fault Events
+          <span style="font-size:11px;font-weight:400;color:#888;margin-left:8px">
+            — CEP engine aggregates related incidents into a single root-cause event
+          </span>
+        </h3>
+        <div class="scroll-list" id="faultList">
+          <div class="empty">No fault events yet — trigger a scenario above</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Tab 2: Telemetry ───────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-telemetry">
     <div class="grid2">
       <div class="card">
-        <h3>Live Telemetry — FEEDER-12</h3>
+        <h3>Live Telemetry — <span id="telemetryFeederLabel">FEEDER-12</span></h3>
         <div class="kpi" id="telemetryKpi">
           <div class="empty">Waiting for data…</div>
         </div>
@@ -278,11 +444,11 @@
     </div>
   </div>
 
-  <!-- ── Tab 2: Incidents ──────────────────────────────────────────────── -->
+  <!-- ── Tab 3: All Incidents ───────────────────────────────────────────── -->
   <div class="tab-panel" id="tab-incidents">
     <div class="grid2">
       <div class="card">
-        <h3>Detected Incidents</h3>
+        <h3>Detected Incidents <span style="font-size:11px;font-weight:400;color:#888">(all severities)</span></h3>
         <div class="scroll-list" id="incList">
           <div class="empty">No incidents detected yet</div>
         </div>
@@ -294,7 +460,7 @@
     </div>
   </div>
 
-  <!-- ── Tab 3: LLM Intelligence ──────────────────────────────────────── -->
+  <!-- ── Tab 4: LLM Intelligence ───────────────────────────────────────── -->
   <div class="tab-panel" id="tab-llm">
 
     <!-- Running narrative -->
@@ -318,21 +484,36 @@
 
 <script>
   // ── State ────────────────────────────────────────────────────────────────
-  const ws       = new WebSocket(`ws://${location.host}/ws`);
-  const incArr   = [];
-  const reportArr = [];
-  let lastMode   = "";
-  let reportCount = 0;
+  const ws         = new WebSocket(`ws://${location.host}/ws`);
+  const incArr     = [];
+  const reportArr  = [];
+  const faultArr   = [];
+  let lastMode     = "";
+  let reportCount  = 0;
+  let faultCount   = 0;
+  let selectedFeeder = "FEEDER-12";
 
   // ── WebSocket connection status ──────────────────────────────────────────
   ws.onopen  = () => document.getElementById("connDot").className = "status-dot green";
   ws.onclose = () => document.getElementById("connDot").className = "status-dot red";
 
+  // ── Feeder selector ──────────────────────────────────────────────────────
+  function onFeederChange(val) {
+    selectedFeeder = val;
+    document.getElementById("telemetryFeederLabel").textContent = val;
+  }
+
   // ── Scenario button ──────────────────────────────────────────────────────
-  function sendCmd(cmd, btn) {
-    ws.send(JSON.stringify({cmd}));
+  function sendScenario(scenario, btn) {
+    const feeder = document.getElementById("feederSelect").value;
+    const payload = JSON.stringify({ scenario, feeder });
+    ws.send(JSON.stringify({ cmd: payload }));
+    // Visual feedback: highlight active button briefly
     document.querySelectorAll(".scenarios button").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
+    if (btn) {
+      btn.classList.add("active");
+      setTimeout(() => btn.classList.remove("active"), 8000);
+    }
   }
 
   // ── Tab switching ────────────────────────────────────────────────────────
@@ -341,14 +522,21 @@
     document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
     document.getElementById("tab-" + name).classList.add("active");
     el.classList.add("active");
-    // Clear report badge when user opens LLM tab
     if (name === "llm") {
       reportCount = 0;
       document.getElementById("reportBadge").textContent = "";
     }
+    if (name === "faults") {
+      faultCount = 0;
+      document.getElementById("faultBadge").textContent = "";
+    }
   }
 
-  // ── Telemetry rendering ──────────────────────────────────────────────────
+  // ── Severity helpers ─────────────────────────────────────────────────────
+  function sevClass(severity) {
+    return { CRITICAL: "critical", HIGH: "high", MEDIUM: "medium", LOW: "low" }[(severity || "").toUpperCase()] || "low";
+  }
+
   function colourClass(key, val) {
     if (key === "TX Load (%)")  return val > 120 ? "crit" : val > 90 ? "warn" : "ok";
     if (key === "TX Temp (°C)") return val > 100 ? "crit" : val > 85 ? "warn" : "ok";
@@ -357,11 +545,72 @@
     return "";
   }
 
+  function severityToConf(severity) {
+    return { CRITICAL: 0.95, HIGH: 0.85, MEDIUM: 0.70, LOW: 0.55 }[severity] || 0.60;
+  }
+  function severityClass(conf) {
+    if (conf >= 0.85) return "high";
+    if (conf >= 0.70) return "med";
+    return "low";
+  }
+
+  // ── Fault Event rendering ─────────────────────────────────────────────────
+  function renderFaultEvents() {
+    if (faultArr.length === 0) {
+      document.getElementById("faultList").innerHTML =
+        "<div class='empty'>No fault events yet — trigger a scenario above</div>";
+      return;
+    }
+
+    const html = faultArr.slice().reverse().map(fe => {
+      const sev  = (fe.severity || "LOW").toUpperCase();
+      const cls  = sevClass(sev);
+      const conf = fe.confidence || 0.0;
+      const ts   = fe.ts_ms ? new Date(fe.ts_ms).toLocaleTimeString() : "";
+      const contributing = fe.contributing_factors || [];
+      const incCount = fe.incident_count || 1;
+      const feeder = fe.feeder_id || "—";
+      const rootCause = fe.root_cause || fe.incident_type || "UNKNOWN";
+      const msg = fe.message || fe.summary || "";
+
+      const factorsHtml = contributing.map(f =>
+        `<span class="fc-factor">${f}</span>`
+      ).join("");
+
+      const confPct = Math.round(conf * 100);
+
+      return `<div class="fault-card">
+        <div class="fc-header">
+          <div>
+            <span class="fc-type ${cls}">${rootCause}</span>
+            <span class="fc-badge ${cls}">${sev}</span>
+          </div>
+          <span class="fc-time">${ts}</span>
+        </div>
+        <div class="fc-meta">
+          Feeder: <b>${feeder}</b>
+          &nbsp;·&nbsp; ${incCount} contributing incident${incCount > 1 ? 's' : ''}
+          &nbsp;·&nbsp; Confidence: ${confPct}%
+        </div>
+        ${msg ? `<div class="fc-msg">${msg}</div>` : ""}
+        ${factorsHtml ? `<div class="fc-factors">${factorsHtml}</div>` : ""}
+        <div class="conf-bar">
+          <div class="conf-bar-fill" style="width:${confPct}%"></div>
+        </div>
+      </div>`;
+    }).join("");
+
+    document.getElementById("faultList").innerHTML = html;
+  }
+
+  // ── Telemetry rendering ──────────────────────────────────────────────────
   function renderTelemetry(t) {
+    // Only show telemetry for selected feeder
+    if (t.feeder_id && t.feeder_id !== selectedFeeder) return;
+
     const p = t?.payload || {};
     const mode = p.mode || "normal";
 
-    // Track mode changes
     if (mode !== lastMode) {
       lastMode = mode;
       const log = document.getElementById("modeLog");
@@ -386,14 +635,10 @@
       </div>`
     ).join("");
 
-    // Extended fields (new in v2)
     const ext = [
-      ["Frequency (Hz)",   p.frequency_hz],
-      ["Power Factor",     p.power_factor],
-      ["Harmonics THD %",  p.harmonics_thd_pct],
-      ["Health Score",     p.health_score],
-      ["Fault Phase",      p.fault_phase],
-      ["Load Factor",      p.load_factor],
+      ["Frequency (Hz)",  p.frequency_hz],
+      ["Power Factor",    p.power_factor],
+      ["Harmonics THD %", p.harmonics_thd_pct],
     ];
     const extHtml = ext.filter(([,v]) => v !== undefined).map(([k,v]) =>
       `<div class="kpi-tile">
@@ -402,27 +647,12 @@
       </div>`
     ).join("");
     document.getElementById("extKpi").innerHTML = extHtml || "<div class='empty'>No extended fields</div>";
-
     document.getElementById("telemetryRaw").textContent = JSON.stringify(t, null, 2);
   }
 
-  // ── Incident rendering ───────────────────────────────────────────────────
-  // Map severity string → 0-1 confidence (for old flat format that has no confidence field)
-  function severityToConf(severity) {
-    return {CRITICAL: 0.95, HIGH: 0.85, MEDIUM: 0.70, LOW: 0.55}[severity] || 0.60;
-  }
-
-  function severityClass(conf) {
-    if (conf >= 0.85) return "high";
-    if (conf >= 0.70) return "med";
-    return "low";
-  }
-
+  // ── Incident rendering ────────────────────────────────────────────────────
   function renderIncidents() {
-    const list = incArr.slice(-10).reverse().map(i => {
-      // Handle both formats:
-      //   new format: { event_type:"incident", ts_ms, payload:{ incident_type, severity, ... } }
-      //   old/flat format: { incident_type, severity, description, ts_ms, ... }
+    const list = incArr.slice(-20).reverse().map(i => {
       const p    = i.payload || i;
       const conf = p.confidence || severityToConf(p.severity);
       const cls  = severityClass(conf);
@@ -461,7 +691,6 @@
       const conf    = p.confidence || 0;
       const ts      = p.generated_at || "";
       const ragUsed = p.rag_context_used || 0;
-
       const similarBadges = (p.similar_incidents || []).map(s =>
         `<span class="badge amber" title="Recorded: ${s.recorded}">
           Similar: ${s.type} (${s.similarity})
@@ -504,12 +733,23 @@
       renderTelemetry(data);
     }
 
-    // ── CEP Incidents ──────────────────────────────────────────────────────
-    // Accept any message on edge/incidents regardless of event_type field
-    // (handles both old flat format and new wrapped format)
+    // ── CEP Incidents → "All Incidents" tab ───────────────────────────────
     if (topic === "edge/incidents") {
       incArr.push(data);
       renderIncidents();
+    }
+
+    // ── Aggregated Fault Events → primary "Fault Events" tab ─────────────
+    if (topic === "edge/fault_events") {
+      faultArr.push(data);
+      renderFaultEvents();
+      // Badge if user is not on fault events tab
+      const faultTab = document.querySelector(".tab:first-child");
+      if (!faultTab.classList.contains("active")) {
+        faultCount++;
+        document.getElementById("faultBadge").innerHTML =
+          `<span class="chip">${faultCount}</span>`;
+      }
     }
 
     // ── LLM Summary (10-second narrative) ─────────────────────────────────
@@ -521,14 +761,11 @@
     if (topic === "edge/reports" && data.event_type === "llm_report") {
       reportArr.push(data.payload);
       renderReports();
-
-      // Badge on tab if user is not on LLM tab
-      const llmTab = document.querySelector(".tab:nth-child(3)");
+      const llmTab = document.querySelector(".tab:nth-child(4)");
       if (!llmTab.classList.contains("active")) {
         reportCount++;
-        document.getElementById("reportBadge").textContent =
-          ` (${reportCount} new)`;
-        document.getElementById("reportBadge").style.color = "#dc2626";
+        document.getElementById("reportBadge").innerHTML =
+          `<span class="chip">${reportCount}</span>`;
       }
     }
   };

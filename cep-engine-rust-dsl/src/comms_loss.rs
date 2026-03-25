@@ -6,6 +6,7 @@
 //
 // The MQTT publish sender is passed in so this task can publish independently.
 
+use crate::suppression::FaultSuppression;
 use crate::types::{Incident, IncidentPayload};
 use crate::window::WindowBuffer;
 use rumqttc::AsyncClient;
@@ -23,9 +24,12 @@ const CHECK_INTERVAL: u64 = 5;    // check every 5 seconds
 /// Spawn a background task that monitors telemetry gaps per feeder.
 /// `telemetry_window` is the same WindowBuffer used by the rules engine,
 /// populated whenever a "telemetry" event arrives.
+/// `suppression` prevents COMMS_LOSS firing right after a CRITICAL fault —
+/// the fault IS the reason for the gap, so COMMS_LOSS would be noise.
 pub fn spawn(
     client:           AsyncClient,
     telemetry_window: Arc<WindowBuffer>,
+    suppression:      Arc<FaultSuppression>,
     site_id:          String,
 ) {
     tokio::spawn(async move {
@@ -37,19 +41,18 @@ pub fn spawn(
             ticker.tick().await;
             let now = now_ms();
 
-            // Inspect every feeder that has ever sent telemetry
-            // WindowBuffer exposes last_seen_ms() per feeder
-            // We need to track known feeders — we use a separate simple list
-            // updated by the rules engine via add_feeder().
-            // For simplicity we rely on the window store itself; DashMap::iter()
-            // gives us all feeder keys currently tracked.
-            // (WindowBuffer wraps DashMap so we expose an iter helper below.)
-
             for (feeder_id, last_ms) in telemetry_window.all_last_seen() {
                 let gap_ms = now.saturating_sub(last_ms);
 
                 if gap_ms > TIMEOUT_SECS * 1_000 {
-                    // Only alert once per feeder per TIMEOUT window
+                    // If a CRITICAL fault recently fired for this feeder,
+                    // skip COMMS_LOSS — the fault is the root cause of the gap.
+                    if suppression.is_suppressed(&feeder_id) {
+                        info!("[COMMS_LOSS] Feeder {} gap {}s — suppressed by active CRITICAL fault", feeder_id, gap_ms / 1_000);
+                        continue;
+                    }
+
+                    // Only alert once per feeder per 3x TIMEOUT window
                     let already_alerted = alerted
                         .get(feeder_id.as_str())
                         .map(|t| now.saturating_sub(*t) < TIMEOUT_SECS * 1_000 * 3)
