@@ -1,6 +1,6 @@
 # CEP Edge Intelligence — Power Substation Fault Detection
 
-A real-time **Complex Event Processing (CEP)** simulation platform for power distribution substations. Detects faults, correlates telemetry events, generates AI-powered incident reports, and visualises everything on a live dashboard — all running locally on Kubernetes.
+A real-time **Complex Event Processing (CEP)** simulation platform for power distribution substations. Detects faults, correlates telemetry patterns, aggregates related incidents into fault events, and generates AI-powered temporal reports — all running on Kubernetes at the edge.
 
 ---
 
@@ -10,61 +10,68 @@ A real-time **Complex Event Processing (CEP)** simulation platform for power dis
 - [Architecture](#architecture)
 - [Services](#services)
 - [MQTT Topics](#mqtt-topics)
-- [Fault Types](#fault-types)
+- [CEP Engine (Rust DSL)](#cep-engine-rust-dsl)
+- [CEP Rules](#cep-rules)
+- [Fault Event Aggregator](#fault-event-aggregator)
 - [AI Intelligence Layer](#ai-intelligence-layer)
-- [CEP Engine (Rust)](#cep-engine-rust)
-- [Quick Start (Minikube)](#quick-start-minikube)
-- [Deployment (NVIDIA Jetson)](#deployment-nvidia-jetson)
+- [Dashboard Scenarios](#dashboard-scenarios)
+- [Quick Start](#quick-start)
 - [Helm Configuration](#helm-configuration)
-- [Dashboard](#dashboard)
+- [Image Tags](#image-tags)
 - [Troubleshooting](#troubleshooting)
+- [Environment Variables](#environment-variables)
 
 ---
 
 ## Overview
 
 ```
-Simulator → MQTT Broker → CEP Engine (Rust) → Incidents → LLM Service → Reports
-                ↓                                  ↓                        ↓
-           Dashboard UI ←──────────── WebSocket bridge ────────────────────←
+Simulator → MQTT Broker → CEP Engine (Rust DSL) → edge/incidents  → Dashboard UI
+                                   │
+                                   └─ FaultEventAggregator → edge/fault_events → LLM Service → Reports
 ```
 
-The platform simulates a power distribution substation (`SUBSTATION-ABU-01`) with:
+The platform simulates `SUBSTATION-ABU-01` with three feeders (FEEDER-12, FEEDER-13, FEEDER-14):
 
-- Continuous telemetry (voltage, current, frequency, power factor)
-- One-click **transient fault** injection (momentary sag, relay trip, auto-reclose)
-- One-click **permanent fault** injection (4 realistic scenarios with relay codes)
-- 13 CEP rules in a **Rust engine** that fires incidents when fault patterns are detected
-- RAG-based LLM reports using ChromaDB + Sentence Transformers + Ollama
+- Continuous background telemetry on all feeders (voltage, current, frequency, temperature, power factor)
+- One-click **scenario injection** — 9 fault scenarios across Critical, High, and Temporal categories
+- **17 CEP rules** in a YAML-driven Rust engine with Pattern A (sustained) and Pattern B (window) detection
+- **Dual-channel publishing** — all incidents to `edge/incidents` (dashboard), aggregated HIGH/CRITICAL to `edge/fault_events` (LLM)
+- **RAG-based LLM reports** using ChromaDB + Sentence Transformers + Ollama — only for CRITICAL/HIGH fault events, with full temporal incident timeline
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Kubernetes Cluster                        │
-│                                                                  │
-│  ┌─────────────┐     ┌──────────────┐     ┌──────────────────┐  │
-│  │  Simulator  │────▶│ MQTT Broker  │────▶│  CEP Engine      │  │
-│  │ simulator   │     │  (Mosquitto) │     │  Rust · ~10 MB   │  │
-│  │ _v2.py      │     │  port 1883   │     │  13 rules        │  │
-│  └─────────────┘     └──────┬───────┘     │  WindowBuffer    │  │
-│                             │             │  IncidentDedup   │  │
-│                             │             └────────┬─────────┘  │
-│                             │                      │incidents   │
-│                             │             ┌────────▼─────────┐  │
-│                             │             │   LLM Service    │  │
-│                             │             │  ChromaDB (RAG)  │  │
-│                             │             │  Ollama / phi3   │  │
-│                             │             └────────┬─────────┘  │
-│                             │                      │reports     │
-│                             ▼                      ▼            │
-│                    ┌─────────────────────────────────────────┐  │
-│                    │         Dashboard UI (FastAPI)           │  │
-│                    │    WebSocket bridge  ·  port 8080        │  │
-│                    └─────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Kubernetes Cluster                              │
+│                                                                          │
+│  ┌─────────────┐     ┌──────────────┐     ┌──────────────────────────┐  │
+│  │  Simulator  │────▶│ MQTT Broker  │────▶│      CEP Engine          │  │
+│  │  v4 (Python)│     │  Mosquitto   │     │   Rust · YAML DSL        │  │
+│  │  9 scenarios│     │  port 1883   │     │   17 rules               │  │
+│  └─────────────┘     └──────┬───────┘     │   WindowBuffer (Pattern B)│  │
+│                             │             │   SustainedTracker (Pat.A)│  │
+│                             │             │   FaultEventAggregator   │  │
+│                             │             │   IncidentDedup (20s)    │  │
+│                             │             │   FaultSuppression (60s) │  │
+│                             │             └──────┬─────────┬─────────┘  │
+│                             │                    │         │            │
+│                             │             edge/incidents  edge/fault_events
+│                             │                    │         │            │
+│                             │                    │   ┌─────▼──────────┐ │
+│                             │                    │   │   LLM Service  │ │
+│                             │                    │   │  ChromaDB RAG  │ │
+│                             │                    │   │  Ollama/gemma2 │ │
+│                             │                    │   └─────┬──────────┘ │
+│                             │                    │         │ edge/reports│
+│                             ▼                    ▼         ▼            │
+│                    ┌────────────────────────────────────────────────┐   │
+│                    │          Dashboard UI (FastAPI + WebSocket)     │   │
+│                    │   Fault Events · Telemetry · Incidents · LLM   │   │
+│                    └────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -73,12 +80,12 @@ The platform simulates a power distribution substation (`SUBSTATION-ABU-01`) wit
 
 | Service | Image | Role |
 |---------|-------|------|
-| `mqtt-broker` | `eclipse-mosquitto` | Central message bus for all event data |
-| `simulator` | custom (Python) | Generates telemetry + fault events on button click |
-| `cep-engine` | custom (**Rust**) | Evaluates 13 rules, publishes incidents — ~10 MB image, ~4 MB RAM |
-| `dashboard-ui` | custom (Python) | FastAPI + WebSocket + HTML live dashboard |
-| `ollama` | `ollama/ollama` | Local LLM server (phi3 / gemma2:2b) |
-| `llm-service` | custom (Python) | RAG pipeline — ChromaDB + Ollama → reports |
+| `mqtt-broker` | `eclipse-mosquitto:2` | Central message bus |
+| `simulator` | `simulator-arm64:3.1` | Telemetry + scenario event injection |
+| `cep-engine` | `cep-engine-arm64:3.1` | Rust CEP engine — 17 YAML rules, dual-channel publish |
+| `dashboard-ui` | `dashboard-ui-arm64:3.0` | FastAPI + WebSocket live dashboard |
+| `ollama` | `ollama/ollama:latest` | Local LLM inference server |
+| `llm-service` | `llm_service:2.1` | RAG pipeline — fault event reports only |
 
 ---
 
@@ -87,103 +94,192 @@ The platform simulates a power distribution substation (`SUBSTATION-ABU-01`) wit
 | Topic | Publisher | Subscriber | Content |
 |-------|-----------|------------|---------|
 | `edge/events` | simulator | cep-engine, llm-service | Raw telemetry and fault events |
-| `edge/incidents` | cep-engine | llm-service, dashboard-ui | Detected incidents with severity + confidence |
+| `edge/incidents` | cep-engine | dashboard-ui | All detected incidents (every severity) |
+| `edge/fault_events` | cep-engine (aggregator) | llm-service, dashboard-ui | Aggregated HIGH/CRITICAL fault events with root cause + contributing factors |
 | `edge/commands` | cep-engine | simulator | Auto-reclose and isolation commands |
 | `edge/summaries` | llm-service | dashboard-ui | 10-second rolling plain-English narrative |
-| `edge/reports` | llm-service | dashboard-ui | Full structured incident reports |
+| `edge/reports` | llm-service | dashboard-ui | Full structured LLM incident reports |
 
-### Event payload structure
+### Why two incident channels?
+
+`edge/incidents` carries every CEP firing (including MEDIUM/LOW) — useful for the dashboard's All Incidents tab. `edge/fault_events` is a separate aggregated channel: the `FaultEventAggregator` collects HIGH/CRITICAL incidents per feeder within a 5-second window, selects the highest-severity as the root cause, and publishes a single structured `FaultEvent`. This keeps the LLM focused on serious faults without noise from routine alerts.
+
+### FaultEvent payload structure
 
 ```json
 {
-  "id": "1741862400000-a3f2c1",
-  "event_type": "relay_trip",
+  "event_type": "fault_event",
   "ts_ms": 1741862400000,
-  "site_id": "SUBSTATION-ABU-01",
   "feeder_id": "FEEDER-12",
-  "payload": {
-    "relay_code": "50/51",
-    "v_sag_kv": 3.2,
-    "i_fault_a": 4800
-  }
-}
-```
-
-### Incident payload structure
-
-```json
-{
-  "id": "inc-1741862400000",
-  "event_type": "incident",
-  "ts_ms": 1741862400000,
-  "payload": {
-    "incident_type": "PERMANENT_FAULT",
-    "severity": "CRITICAL",
-    "confidence": 0.95,
-    "summary": "Breaker lockout on FEEDER-12 after 3 failed reclose attempts",
-    "feeder_id": "FEEDER-12",
-    "details": { ... }
-  }
+  "root_cause": "TRANSFORMER_OVERLOAD",
+  "severity": "CRITICAL",
+  "confidence": 0.92,
+  "message": "Transformer TX-12 load warning: 122% of rated capacity...",
+  "contributing_factors": ["TRANSFORMER_TEMPERATURE", "TRANSFORMER_OVERHEATING_SUSTAINED"],
+  "incident_count": 3
 }
 ```
 
 ---
 
-## Fault Types
+## CEP Engine (Rust DSL)
 
-### Transient Fault
-A brief electrical disturbance that clears on its own. The simulator fires a voltage sag, relay trip, and automatic reclose sequence.
+The engine is written in **Rust** with rules defined in `rules.yaml` — no recompilation needed to add or change rules.
 
-| Step | Event | Delay |
-|------|-------|-------|
-| 1 | `voltage_sag` — V drops to fault level | 0s |
-| 2 | `relay_trip` — protection relay opens breaker | 0.5s |
-| 3 | `breaker_reclose` — auto-reclose attempt | 2s |
-| 4 | Telemetry returns to normal | 3s |
+### Project structure
 
-### Permanent Fault
-A sustained fault that cannot be cleared by auto-reclose. Four realistic scenarios are randomly selected:
+```
+cep-engine-rust-dsl/
+├── Cargo.toml            # tokio · rumqttc · serde_yaml · dashmap · uuid · tracing
+├── Dockerfile            # multi-stage: rust:1.85-slim → debian-slim (~25 MB)
+├── rules.yaml            # all 17 CEP rules — edit without recompiling
+└── src/
+    ├── main.rs           # MQTT wiring, event loop, dual-channel publish
+    ├── types.rs          # EdgeEvent, Incident, FaultEvent structs
+    ├── config.rs         # YAML DSL: Rule, Condition, SustainedConfig, FireConfig
+    ├── rules.rs          # Rule evaluation loop (priority-ordered)
+    ├── window.rs         # Sliding time-window buffer (Pattern B)
+    ├── sustained.rs      # Sustained condition tracker (Pattern A)
+    ├── aggregator.rs     # FaultEventAggregator — 5s collection window
+    ├── dedup.rs          # Incident dedup — 20s cooldown per type+feeder
+    └── comms_loss.rs     # Background COMMS_LOSS detector (15s timeout)
+```
 
-| Scenario | Relay Codes | Key Events |
-|----------|-------------|------------|
-| `BREAKER_LOCKOUT` | 50/51 | 3 failed reclose attempts → lockout |
-| `TRANSFORMER_WINDING_FAILURE` | 87T / 63 | Differential + gas relay → equipment offline |
-| `CABLE_INSULATION_FAILURE` | 21 / 67 | Distance + directional → zone isolation |
-| `SWITCHGEAR_BUSBAR_FAULT` | 87B / 50BF | Busbar differential → all 3 feeders down |
+### Resource footprint
+
+| | Python engine | Rust DSL engine |
+|---|---|---|
+| Image size | ~800 MB | ~25 MB |
+| RAM at runtime | ~120 MB | ~6 MB |
+| Startup time | ~3s | <50ms |
+
+### Rule DSL
+
+Rules are defined in `rules.yaml`. The engine supports:
+
+- **`where`** — AND conditions across any payload field (`lt`, `lte`, `gt`, `gte`, `eq`, `in`, `bool`)
+- **`window`** — Pattern B: count events in a sliding time window (`bucket`, `seconds`, `count_gte`)
+- **`sustained`** — Pattern A: condition must be continuously true for N seconds (`key`, `for_secs`)
+- **`escalate`** — severity promotion when additional conditions are met
+- **`clear_window_on_fire`** — reset the bucket after the rule fires
+- **`early_return`** — stop evaluating lower-priority rules after this one fires
+
+Example rule (Pattern A — sustained condition):
+
+```yaml
+- id: transformer_overheating_sustained
+  priority: 15
+  on: temperature_warning
+  sustained:
+    key: tx_temp_high
+    for_secs: 60
+  fire:
+    type: TRANSFORMER_OVERHEATING_SUSTAINED
+    severity: HIGH
+    confidence: 0.90
+    message: "Transformer chronic overheating confirmed on {feeder_id} — sustained 60+ seconds, current {temperature_c}°C"
+```
+
+Example rule (compound AND condition + 2-second window):
+
+```yaml
+- id: severe_grid_disturbance
+  priority: 17
+  on: telemetry
+  where:
+    frequency_hz: {lt: 49.5}
+    v_kv: {lt: 10.45}           # 0.95 pu × 11kV nominal
+  window:
+    bucket: grid_disturbance
+    seconds: 2
+    count_gte: 2
+  fire:
+    type: SEVERE_GRID_DISTURBANCE
+    severity: CRITICAL
+    confidence: 0.93
+    message: "Severe grid disturbance on {feeder_id}: {frequency_hz} Hz and {v_kv} kV (below 0.95 pu)"
+  clear_window_on_fire: true
+```
+
+---
+
+## CEP Rules
+
+17 rules evaluated in priority order. Rules with `early_return: true` stop evaluation for lower-priority rules on the same event.
+
+| Priority | Rule | Event Type | Detection | Severity |
+|----------|------|-----------|-----------|----------|
+| 1 | `BUSBAR_FAULT` | relay_trip | 87B or 50BF code | CRITICAL |
+| 2 | `TRANSFORMER_FAULT` | relay_trip | 87T or 63 code | CRITICAL |
+| 3 | `DISTANCE_FAULT` | relay_trip | 21 or 67 code | HIGH |
+| 4 | `OVERCURRENT_FAULT` | relay_trip | 50, 51, or 50/51 code | HIGH / CRITICAL |
+| 5 | `BREAKER_LOCKOUT` | breaker_open | 3+ failures in 30s (Pattern B) | CRITICAL |
+| 6 | `RECLOSE_SUCCESS` | breaker_close | reclose after relay trip | LOW |
+| 7 | `EQUIPMENT_OFFLINE` | equipment_offline | asset goes offline | HIGH |
+| 8 | `ZONE_ISOLATION` | isolation_command | zone isolation command | HIGH |
+| 9 | `TRANSFORMER_OVERLOAD` | telemetry | load > 105% rated | HIGH / CRITICAL |
+| 10 | `TRANSFORMER_TEMPERATURE` | temperature_warning | temp > 90°C | MEDIUM |
+| 11 | `PRE_FAULT_WARNING` | telemetry | V sag > 10% or I spike > 20% | MEDIUM |
+| 12 | `VOLTAGE_QUALITY` | harmonic_distortion | 3+ harmonic events in 60s (Pattern B) | MEDIUM |
+| 13 | `LIGHTNING_IMPACT` | weather_lightning | lightning strike event | HIGH |
+| 14 | `FREQUENCY_DEVIATION` | frequency_deviation | 2+ freq events in 60s (Pattern B) | MEDIUM |
+| 15 | `TRANSFORMER_OVERHEATING_SUSTAINED` | temperature_warning | temp alarm sustained 60s (Pattern A) | HIGH |
+| 16 | `REPEATED_TRANSIENT_FAULT` | relay_trip | 2+ overcurrent trips in 30s (Pattern B) | HIGH |
+| 17 | `SEVERE_GRID_DISTURBANCE` | telemetry | freq < 49.5 Hz AND voltage < 0.95 pu in 2s window | CRITICAL |
+
+**Dedup:** 20-second cooldown per `incident_type + feeder_id`. **Fault suppression:** 60 seconds per feeder after a CRITICAL fires (prevents cascade noise). **COMMS_LOSS:** fires if no telemetry from a feeder for > 15 seconds.
+
+---
+
+## Fault Event Aggregator
+
+The `FaultEventAggregator` runs as a background task in the CEP engine. It:
+
+1. Collects HIGH and CRITICAL incidents per feeder within a **5-second window**
+2. Selects the highest-severity incident as the **root cause**
+3. Lists all others as **contributing factors**
+4. Publishes a single `FaultEvent` to `edge/fault_events`
+
+This means a transformer stress scenario that fires `TRANSFORMER_OVERLOAD` (CRITICAL) + `TRANSFORMER_TEMPERATURE` (MEDIUM) + `TRANSFORMER_OVERHEATING_SUSTAINED` (HIGH) within 5 seconds produces **one** fault event, not three LLM reports.
 
 ---
 
 ## AI Intelligence Layer
 
-The LLM service implements a **RAG (Retrieval-Augmented Generation)** pipeline:
+The LLM service generates reports **only for HIGH/CRITICAL fault events** on `edge/fault_events`. Individual incidents on `edge/incidents` are silently buffered for timeline context — no per-incident LLM calls.
+
+### Pipeline
 
 ```
-New Incident
-     │
-     ▼
-ChromaDB query ──▶ Find top-3 similar past incidents (cosine similarity)
-     │
-     ▼
-Prompt builder ──▶ Incident data + RAG context + recent events (last 30s)
-     │
-     ▼
-Ollama / phi3  ──▶ Generate structured 6-section report
-     │
-     ▼
-ChromaDB store ──▶ Save report as embedding for future RAG
-     │
-     ▼
-edge/reports   ──▶ Publish to dashboard LLM Intelligence tab
+edge/fault_events (FaultEvent)
+        │
+        ├─ on_incident() → incident_buffer (120s window, no report)
+        │
+        └─ on_fault_event() [HIGH/CRITICAL only]
+                │
+                ├─ RAG: ChromaDB cosine similarity → top-3 similar past reports
+                │
+                ├─ Prompt builder:
+                │     FAULT EVENT summary
+                │     INCIDENT TIMELINE (all buffered incidents, timestamped)
+                │     RAW TELEMETRY (load%, temp, freq over 120s window)
+                │     SIMILAR PAST INCIDENTS (RAG context)
+                │
+                ├─ Ollama → generate 6-section temporal report (max 1200 tokens)
+                │
+                ├─ ChromaDB store → save for future RAG
+                │
+                └─ edge/reports → publish to dashboard LLM Intelligence tab
 ```
 
 ### Report sections
 
-1. **Root Cause Analysis** — what caused the incident based on telemetry
-2. **Immediate Impact** — affected assets and customers
-3. **Recommended Actions** — step-by-step operator instructions
-4. **Estimated Resolution Time** — based on incident type and history
+1. **Fault Origin & Progression** — how the fault developed over time with specific timestamps
+2. **Root Cause** — most likely cause in one or two sentences
+3. **Asset & Customer Impact** — affected transformer/feeder and customer risk
+4. **Immediate Actions** — numbered priority-ordered operator steps
 5. **Historical Comparison** — similar past incidents from ChromaDB
-6. **Preventive Measures** — recurrence reduction recommendations
+6. **Preventive Measures** — specific recurrence-reduction actions
 
 ### Supported models
 
@@ -191,248 +287,132 @@ edge/reports   ──▶ Publish to dashboard LLM Intelligence tab
 |-------|-----|-------------|---------|
 | `phi3` | 3.5GB | 60–120s | Best |
 | `gemma2:2b` | 2.0GB | 30–60s | Good |
-| `qwen2.5:1.5b` | 1.2GB | 15–30s | Decent |
+| `llama3.2:1b` | 1.2GB | 15–30s | Decent |
 | `tinyllama` | 0.9GB | 10–20s | Basic |
 
-Change model at any time without redeploying code:
+Change model without redeploying:
 ```bash
 kubectl set env deployment/llm-service -n cep-edge OLLAMA_MODEL=gemma2:2b
 ```
 
 ---
 
-## CEP Engine (Rust)
+## Dashboard Scenarios
 
-The CEP engine is written in **Rust** for minimal resource usage and fast startup. It replaces the original Python `cep_engine.py`.
+The dashboard has a feeder selector (FEEDER-12 / FEEDER-13 / FEEDER-14) and three scenario rows:
 
-### Project structure
+### ⛔ Critical — instant single-event detections
 
-```
-cep-engine-rust/
-├── Cargo.toml           # tokio · rumqttc · serde · dashmap · uuid · tracing
-├── Dockerfile           # multi-stage: rust:1.85-slim → scratch (~10 MB)
-├── k8s-deployment.yaml  # k8s deployment manifest
-└── src/
-    ├── main.rs          # MQTT wiring, env config, async event loop
-    ├── types.rs         # EdgeEvent, Incident, IncidentPayload structs
-    ├── rules.rs         # all 13 CEP rules with priority ordering
-    ├── window.rs        # sliding time-window buffer (DashMap, lock-free)
-    ├── dedup.rs         # incident dedup / 20-second cooldown
-    └── comms_loss.rs    # background COMMS_LOSS detector (15s timeout)
-```
+| Button | Scenario | CEP Rule Fired |
+|--------|----------|----------------|
+| Busbar Fault | 87B relay trip | BUSBAR_FAULT CRITICAL |
+| Transformer Fault | 87T relay trip | TRANSFORMER_FAULT CRITICAL |
+| Line Lockout | 3 failed reclosures over 7s | BREAKER_LOCKOUT CRITICAL |
 
-### Resource comparison
+### ⚠ High — single-event HIGH severity
 
-| | Python `cep_engine.py` | Rust `cep-engine` |
-|---|---|---|
-| Image size | ~800 MB | ~10 MB |
-| RAM at runtime | ~120 MB | ~4 MB |
-| Startup time | ~3s | <50ms |
-| CPU (idle) | ~5m cores | ~0.5m cores |
+| Button | Scenario | CEP Rule Fired |
+|--------|----------|----------------|
+| Cable Fault | Zone-2 distance relay | DISTANCE_FAULT HIGH |
+| Lightning Strike | 48.5 kA surge event | LIGHTNING_IMPACT HIGH |
 
-### Build on Mac M4
+### ⏱ Temporal — window-based and sustained detection
 
-Mac M4 and Jetson are both **ARM64** — the same binary runs on both with no cross-compilation:
-
-```bash
-# Install Rust (once)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-rustup target add aarch64-unknown-linux-musl
-brew install filosottile/musl-cross/musl-cross
-
-# Local build (for development and testing)
-cd cep-engine-rust
-cargo build --release
-
-# Docker build (for Minikube and Jetson)
-eval $(minikube docker-env)
-docker build -t cep-engine-rust:1.0.0 .
-```
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MQTT_HOST` | `mqtt-broker` | MQTT broker hostname |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-| `SITE_ID` | `SUBSTATION-ABU-01` | Substation identifier |
-| `RUST_LOG` | `info` | Log level (`debug` / `info` / `warn`) |
+| Button | Scenario | CEP Pattern | Severity |
+|--------|----------|-------------|----------|
+| TX Overload (Pattern E) | Load ramp → 14 temp alarms over 70s | Pattern A (sustained 60s) | CRITICAL |
+| Voltage Quality (Pattern B) | 3 harmonic events in 3s | Pattern B (window count) | MEDIUM |
+| Freq Deviation (Pattern B) | 2 frequency dips in 60s | Pattern B (window count) | MEDIUM |
+| Severe Grid Disturbance | Freq < 49.5 Hz AND voltage < 0.95 pu, 2 readings in 2s | AND + window | CRITICAL |
+| Reclose Success | Relay trip → successful auto-reclose | Single event | LOW |
 
 ---
 
-## Quick Start (Minikube)
+## Quick Start
 
 ### Prerequisites
 
-- Docker Desktop
-- minikube
-- kubectl
-- helm
-- Rust (for local development only)
+- Docker (with ARM64 build support)
+- `kubectl` and `helm`
+- Azure CLI (`az`) — for ACR push
+- Minikube or a Kubernetes cluster
 
-### 1 — Start Minikube with enough memory
-
-```bash
-minikube start --memory=6144 --cpus=4
-```
-
-### 2 — Build the Rust CEP engine image
+### 1 — Build and push images
 
 ```bash
-eval $(minikube docker-env)
-cd cep-engine-rust
-docker build -t cep-engine-rust:1.0.0 .
+eval $(minikube docker-env)   # if using Minikube
+
+az acr login --name commonpoc
+
+docker build --no-cache --platform linux/arm64 \
+  -t commonpoc.azurecr.io/cep-engine-arm64:3.1 ./cep-engine-rust-dsl
+docker build --no-cache --platform linux/arm64 \
+  -t commonpoc.azurecr.io/simulator-arm64:3.1 ./simulator
+docker build --no-cache --platform linux/arm64 \
+  -t commonpoc.azurecr.io/dashboard-ui-arm64:3.0 ./dashboard-ui
+docker build --no-cache --platform linux/arm64 \
+  -t commonpoc.azurecr.io/llm_service:2.1 ./llm_service
+
+docker push commonpoc.azurecr.io/cep-engine-arm64:3.1
+docker push commonpoc.azurecr.io/simulator-arm64:3.1
+docker push commonpoc.azurecr.io/dashboard-ui-arm64:3.0
+docker push commonpoc.azurecr.io/llm_service:2.1
 ```
 
-### 3 — Deploy with Helm
+### 2 — Deploy with Helm
 
 ```bash
-helm install cep-edge ./charts/cep-edge -n cep-edge --create-namespace
+helm upgrade --install cep-edge ./edge-cep-demo -n cep-edge --create-namespace
 ```
 
-### 4 — Wait for all pods to be ready
+### 3 — Wait for pods
 
 ```bash
 kubectl get pods -n cep-edge -w
 ```
 
-All 6 pods should reach `Running` state. The `llm-service` pod has two init containers (`wait-for-mqtt`, `wait-for-ollama`) that must complete first.
+All 6 pods should reach `Running`. The `llm-service` pod waits for both MQTT and Ollama via init containers before starting.
 
-### 5 — Open the dashboard
+### 4 — Open the dashboard
 
 ```bash
 minikube service dashboard-ui -n cep-edge
+# or
+kubectl port-forward svc/dashboard-ui -n cep-edge 8080:8000
 ```
 
-### 6 — Trigger a fault
+### 5 — Trigger a scenario
 
-Click **Permanent Fault** or **Transient Fault** on the dashboard. Within 10–120 seconds (depending on model) you will see:
+Select a feeder, click a scenario button. Within seconds you will see:
 
-- **Incidents tab** — incident card with type, severity, confidence
-- **LLM Intelligence tab** — full structured report from Ollama
-
----
-
-## Deployment (NVIDIA Jetson)
-
-Mac M4 and Jetson Orin/NX are both **ARM64** — the same Docker image built on your Mac runs directly on the Jetson with no changes.
-
-### Prerequisites on Jetson
-
-```bash
-# Install k3s
-curl -sfL https://get.k3s.io | sh -
-
-# Install NVIDIA Container Toolkit
-sudo apt install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=containerd
-sudo systemctl restart containerd k3s
-```
-
-### Transfer images from Mac to Jetson
-
-```bash
-# Save the Rust CEP engine image built on Mac M4
-docker save cep-engine-rust:1.0.0 | gzip > cep-engine-rust.tar.gz
-
-# Copy to Jetson and load into k3s
-scp cep-engine-rust.tar.gz user@jetson-ip:~
-ssh user@jetson-ip "sudo k3s ctr images import cep-engine-rust.tar.gz"
-```
-
-### Deploy with GPU enabled
-
-```bash
-helm install cep-edge ./charts/cep-edge \
-  -n cep-edge --create-namespace \
-  -f values-jetson.yaml
-```
-
-With GPU, phi3 inference drops from **60–120s → 3–8s**.
+- **Fault Events tab** — aggregated fault event card with root cause, severity, contributing factors
+- **All Incidents tab** — individual CEP incidents as they fire
+- **LLM Intelligence tab** — full temporal report (CRITICAL/HIGH only, ~30–120s depending on model)
 
 ---
 
 ## Helm Configuration
 
-### `values.yaml` reference
+Key `values.yaml` fields:
 
 ```yaml
-# MQTT Broker
-mqtt:
-  image: eclipse-mosquitto:2
-  port: 1883
-
-# Simulator
 simulator:
-  image: your-registry/cep-simulator:latest
-  resources:
-    limits:
-      memory: 256Mi
+  image: commonpoc.azurecr.io/simulator-arm64:3.1
 
-# CEP Engine (Rust) — very low resource footprint
-cepEngine:
-  image:
-    repository: cep-engine-rust
-    tag: "1.0.0"
-    pullPolicy: IfNotPresent
-  env:
-    MQTT_HOST: mqtt-broker
-    MQTT_PORT: "1883"
-    SITE_ID: SUBSTATION-ABU-01
-    RUST_LOG: info
-  resources:
-    requests:
-      cpu: "50m"
-      memory: "32Mi"
-    limits:
-      cpu: "200m"
-      memory: "128Mi"
+cep:
+  image: commonpoc.azurecr.io/cep-engine-arm64:3.1
 
-# Dashboard
 dashboard:
-  image: your-registry/dashboard-ui:latest
-  port: 8080
-  resources:
-    limits:
-      memory: 256Mi
+  image: commonpoc.azurecr.io/dashboard-ui-arm64:3.0
 
-# Ollama LLM Server
 ollama:
   image: ollama/ollama:latest
-  model: phi3                    # change to gemma2:2b for lower memory
-  storage: 10Gi                  # PVC for model persistence
-  gpu:
-    enabled: false               # set true on Jetson
-    count: 1
-  resources:
-    requests:
-      cpu: "1"
-      memory: 4Gi
-    limits:
-      cpu: "2"
-      memory: 6Gi
+  storage: 3Gi
 
-# LLM Service
 llmService:
-  image: your-registry/llm-service:latest
-  chromaPath: /data/incident_store
-  summaryIntervalS: 10
-  ragTopK: 3
-  resources:
-    limits:
-      memory: 1Gi
-```
-
-### Updating the CEP engine image
-
-The only required `values.yaml` change when upgrading the Rust engine is the image tag:
-
-```yaml
-cepEngine:
-  image:
-    repository: cep-engine-rust
-    tag: "1.1.0"    # bump this
+  image: commonpoc.azurecr.io/llm_service:2.1
+  ollamaModel: "llama3.2:1b"   # change to gemma2:2b or phi3 as needed
+  chromaStorage: 2Gi
 ```
 
 ### Memory sizing by model
@@ -441,138 +421,97 @@ cepEngine:
 |-------|-------------------|-----------------|
 | phi3 | 4Gi | 6Gi |
 | gemma2:2b | 2Gi | 3Gi |
-| qwen2.5:1.5b | 1Gi | 2Gi |
+| llama3.2:1b | 1.5Gi | 2.5Gi |
 | tinyllama | 512Mi | 1Gi |
 
-> **Rule of thumb:** `requests` = model file size on disk. `limits` = requests × 1.5.
-
 ---
 
-## Dashboard
+## Image Tags
 
-### Incidents Tab
-
-Displays every incident fired by the CEP engine in real time.
-
-| Field | Description |
-|-------|-------------|
-| Type | Incident classification (e.g. `PERMANENT_FAULT`) |
-| Severity | `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` |
-| Confidence | 0–100% — how certain the CEP engine is |
-| Feeder | Affected feeder ID |
-| Summary | One-line human-readable description |
-| Raw JSON | Full incident payload for debugging |
-
-### LLM Intelligence Tab
-
-Displays AI-generated reports from Ollama. Each report includes root cause, impact, recommended actions, resolution time, historical comparison, and preventive measures.
-
-A **Live Narration** panel updates every 10 seconds with a plain-English summary of current substation activity.
-
----
-
-## CEP Engine Rules
-
-The Rust engine evaluates 13 rules in priority order. Priority 1–2 rules trigger an early return so lower-priority rules do not fire on the same event.
-
-| Priority | Rule | Trigger | Severity |
-|----------|------|---------|----------|
-| 1 | `BUSBAR_FAULT` | Relay 87B or 50BF | CRITICAL |
-| 2 | `TRANSFORMER_FAULT` | Relay 87T or 63 | CRITICAL |
-| 3 | `DISTANCE_FAULT` | Relay 21 or 67 | HIGH |
-| 4 | `OVERCURRENT_FAULT` | Relay 50 or 51 | HIGH |
-| 5 | `BREAKER_LOCKOUT` | 3+ failed reclosures in 30s | CRITICAL |
-| 6 | `RECLOSE_SUCCESS` | Reclose after relay trip | LOW |
-| 7 | `EQUIPMENT_OFFLINE` | Asset goes offline | HIGH |
-| 8 | `ZONE_ISOLATION` | Zone isolation command | HIGH |
-| 9 | `TRANSFORMER_OVERLOAD` | Load > 105% rated capacity | HIGH / CRITICAL |
-| 10 | `PRE_FAULT_WARNING` | V sag > 10% or I spike > 20% | MEDIUM |
-| 11 | `VOLTAGE_QUALITY` | 3+ harmonic events in 60s | MEDIUM |
-| 12 | `LIGHTNING_IMPACT` | Lightning strike event | HIGH |
-| 13 | `FREQUENCY_DEVIATION` | 2+ frequency events in 60s | MEDIUM |
-
-Incidents are deduplicated with a **20-second cooldown** per `incident_type + feeder_id` pair. A background task fires `COMMS_LOSS` if no telemetry is received from a feeder for more than **15 seconds**.
+| Image | Tag | Changes |
+|-------|-----|---------|
+| `cep-engine-arm64` | `:3.1` | SustainedTracker, FaultEventAggregator, dual-channel publish, 17 rules |
+| `simulator-arm64` | `:3.1` | simulator_v4.py — 9 scenarios, sustained alarm thread, severe grid disturbance |
+| `dashboard-ui-arm64` | `:3.0` | Fault Events primary tab, feeder selector, scenario rows |
+| `llm_service` | `:2.1` | Fault-event-only reports, incident timeline buffer, temporal prompt, torch pinned |
 
 ---
 
 ## Troubleshooting
 
-### Incidents tab is empty
+### Fault Events tab is empty
 
 ```bash
-# Confirm CEP engine is publishing
+# Confirm fault events are being published
 kubectl exec -n cep-edge deploy/mqtt-broker -- \
-  mosquitto_sub -t edge/incidents -W 10 -v
+  mosquitto_sub -t edge/fault_events -W 15 -v
 
-# Check CEP engine logs (Rust uses structured tracing logs)
-kubectl logs -n cep-edge -l app=cep-engine --tail=50
-# Expected output:
-# INFO cep_engine: [CEP] Connected to MQTT broker at mqtt-broker:1883
-# INFO cep_engine: [CEP] Subscribed to edge/events
+# Check CEP engine aggregator logs
+kubectl logs -n cep-edge deploy/cep-engine --tail=50 | grep -E "FaultEvent|AGG|fault"
+```
+
+### LLM reports not appearing
+
+```bash
+# Confirm llm-service is receiving fault events (not just incidents)
+kubectl logs -n cep-edge deploy/llm-service --tail=50 | grep -E "FaultEvent|REPORT|fault"
+
+# Confirm Ollama has a model loaded
+kubectl exec -n cep-edge \
+  $(kubectl get pod -n cep-edge -l app=ollama -o jsonpath='{.items[0].metadata.name}') \
+  -- ollama list
+```
+
+### Pattern A (sustained) rule not firing
+
+Pattern A requires the condition to be **continuously observed** for `for_secs` seconds. The `SustainedTracker` resets if no observation arrives within 2 seconds. Ensure the simulator is sending repeated events at ≤ 2-second intervals for the full duration.
+
+```bash
+# Watch temperature_warning events arrive
+kubectl exec -n cep-edge deploy/mqtt-broker -- \
+  mosquitto_sub -t edge/events -W 80 -v | grep temperature_warning
+```
+
+### Browser showing old dashboard UI
+
+Hard refresh to bypass browser cache:
+```
+Mac:     Cmd + Shift + R
+Windows: Ctrl + Shift + R
+```
+Or open an incognito/private window.
+
+### llm-service crash loop (ConnectionRefusedError)
+
+The entrypoint retries MQTT and Ollama connections with a 120-second timeout. If pods are in `CrashLoopBackOff`:
+
+```bash
+kubectl logs -n cep-edge deploy/llm-service --tail=30
+# Look for [WAIT] or [WARN] lines to see which dependency is missing
+kubectl get pods -n cep-edge   # confirm mqtt-broker and ollama are Running
+```
+
+### Image pull errors (ACR)
+
+```bash
+kubectl describe pod -n cep-edge <pod-name> | grep -A5 "Failed"
+# If ImagePullBackOff — confirm the regcred secret exists
+kubectl get secret regcred -n cep-edge
+# Recreate if missing:
+kubectl create secret docker-registry regcred \
+  --docker-server=commonpoc.azurecr.io \
+  --docker-username=<username> \
+  --docker-password=<password> \
+  -n cep-edge
 ```
 
 ### CEP engine pod not starting
 
 ```bash
 kubectl describe pod -n cep-edge -l app=cep-engine
-# Common cause: wrong image name or tag in values.yaml
-# Fix: ensure cepEngine.image.repository and tag match the built image
+# Common cause: wrong image tag in values.yaml
+# Check: kubectl logs -n cep-edge deploy/cep-engine
 ```
-
-### LLM reports not appearing
-
-```bash
-# Check llm-service is receiving incidents
-kubectl logs -n cep-edge -l app=llm-service --tail=50 | grep -E "Incident|REPORT|error"
-
-# Confirm Ollama has the model
-kubectl exec -n cep-edge \
-  $(kubectl get pod -n cep-edge -l app=ollama -o jsonpath='{.items[0].metadata.name}') \
-  -- ollama list
-```
-
-### phi3 / model OOM crash
-
-Check memory:
-```bash
-kubectl describe pod -n cep-edge -l app=ollama | grep -E "OOM|Exit Code|Limits"
-```
-
-Fix — switch to a smaller model:
-```bash
-kubectl set env deployment/llm-service -n cep-edge OLLAMA_MODEL=gemma2:2b
-kubectl exec -n cep-edge <ollama-pod> -- ollama pull gemma2:2b
-```
-
-### Model lost after pod restart
-
-The Ollama PVC is not mounted at `/root/.ollama`. Verify:
-```bash
-kubectl exec -n cep-edge <ollama-pod> -- df -h /root/.ollama
-# Should show a real volume, not "overlay"
-```
-
-Fix in Helm values:
-```yaml
-ollama:
-  persistentVolume:
-    mountPath: /root/.ollama
-```
-
-### Docker build fails with `edition2024` error
-
-The Dockerfile requires Rust 1.85+. Verify the first line of `Dockerfile`:
-```dockerfile
-FROM rust:1.85-slim AS builder   # must be 1.85 or newer
-```
-
-### paho-mqtt version errors (llm-service / simulator)
-
-All Python services detect paho v1/v2 automatically:
-```python
-_PAHO_V2 = hasattr(mqtt, "CallbackAPIVersion")
-```
-No manual version management needed.
 
 ---
 
@@ -582,13 +521,13 @@ No manual version management needed.
 |----------|---------|---------|-------------|
 | `MQTT_HOST` | all | `mqtt-broker` | MQTT broker hostname |
 | `MQTT_PORT` | all | `1883` | MQTT broker port |
-| `RUST_LOG` | cep-engine | `info` | Rust log level (`debug`/`info`/`warn`) |
 | `SITE_ID` | cep-engine, simulator | `SUBSTATION-ABU-01` | Substation identifier |
-| `OLLAMA_HOST` | llm-service | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | llm-service | `phi3` | Model name |
-| `CHROMA_PATH` | llm-service | `./incident_store` | ChromaDB persistence path |
-| `SUMMARY_INTERVAL_S` | llm-service | `10` | Narrative summary frequency |
-| `RAG_TOP_K` | llm-service | `3` | Similar incidents to retrieve |
+| `RUST_LOG` | cep-engine | `info` | Log level (`debug` / `info` / `warn`) |
+| `OLLAMA_HOST` | llm-service | `http://ollama:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | llm-service | `llama3.2:1b` | Model name |
+| `CHROMA_PATH` | llm-service | `/app/incident_store` | ChromaDB persistence path |
+| `SUMMARY_INTERVAL_S` | llm-service | `10` | Narrative summary frequency (seconds) |
+| `RAG_TOP_K` | llm-service | `3` | Similar incidents to retrieve for RAG |
 
 ---
 
